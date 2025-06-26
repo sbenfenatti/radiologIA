@@ -1,21 +1,23 @@
-# Define a imagem base do Python que vamos usar
-FROM python:3.10-slim
+# Usa uma imagem Python mais completa para garantir compatibilidade
+FROM python:3.10
 
-# Define o diretório de trabalho dentro do container
-WORKDIR /code
+# Cria e define o diretório de trabalho
+WORKDIR /app
 
-# Copia o arquivo de requerimentos para o container
-COPY ./requirements.txt /code/requirements.txt
+# Atualiza o pip para a versão mais recente
+RUN pip install --upgrade pip
 
-# Instala as bibliotecas Python listadas no requirements.txt
-RUN pip install --no-cache-dir --upgrade -r /code/requirements.txt
+# Copia o arquivo de requerimentos ANTES de todo o resto
+COPY requirements.txt .
 
-# Copia todo o resto do seu projeto (app.py, models/, static/) para o container
-COPY . /code/
+# Instala as dependências de forma robusta
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Expõe a porta que o Hugging Face usará para se comunicar com a nossa aplicação
+# Agora, copia o resto do código da sua aplicação
+COPY . .
+
+# Expõe a porta que o Hugging Face usa
 EXPOSE 7860
 
-# O comando final que inicia o servidor Gunicorn quando o container rodar
-# CORREÇÃO: Usamos "python -m gunicorn" para garantir que o executável seja encontrado.
-CMD ["python", "-m", "gunicorn", "--bind", "0.0.0.0:7860", "app:app"]
+# Comando final para iniciar o servidor, usando o caminho completo para o python do ambiente
+CMD ["/usr/local/bin/python", "-m", "gunicorn", "--bind", "0.0.0.0:7860", "app:app"]

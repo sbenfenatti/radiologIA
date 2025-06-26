@@ -17,5 +17,5 @@ COPY . /code/
 EXPOSE 7860
 
 # O comando final que inicia o servidor Gunicorn quando o container rodar
-CMD ["gunicorn", "--bind", "0.0.0.0:7860", "app:app"]
-
+# CORREÇÃO: Usamos "python -m gunicorn" para garantir que o executável seja encontrado.
+CMD ["python", "-m", "gunicorn", "--bind", "0.0.0.0:7860", "app:app"]

@@ -9,7 +9,6 @@
     <style>
         body {
             font-family: 'Inter', sans-serif;
-            /* Cor do texto principal alterada para escura para melhor contraste */
             color: #1e293b; /* slate-800 */
             background: linear-gradient(-45deg, #b3d1ff, #c2e6d0, #fff9c4, #b3d1ff);
             background-size: 400% 400%;
@@ -49,7 +48,6 @@
             box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.1);
         }
         
-        /* Novo estilo para os botões, com efeito glass */
         .glass-button {
             background: rgba(255, 255, 255, 0.2);
             border: 1px solid rgba(255, 255, 255, 0.3);
@@ -87,7 +85,6 @@
 <body class="text-slate-800">
     <canvas id="background-canvas"></canvas>
 
-    <!-- Página de Login -->
     <div id="login-page" class="flex flex-col h-screen justify-center items-center p-4 relative">
         <img src="https://lh3.googleusercontent.com/d/1pnjD304jKuhy_O_YE-4kQDy42rJvjrCj" alt="RadiologIA Logo" class="h-24 w-auto mb-8">
         <div class="w-full max-w-sm flex flex-col items-center glass-effect rounded-2xl p-8">
@@ -107,7 +104,6 @@
     </div>
 
 
-    <!-- Página de Boas-Vindas (Foco no Chat) -->
     <div id="welcome-page" class="hidden flex-col h-screen justify-center items-center p-4 relative">
         <img src="https://lh3.googleusercontent.com/d/1pnjD304jKuhy_O_YE-4kQDy42rJvjrCj" alt="RadiologIA Logo" class="h-24 w-auto mb-8">
         <div id="welcome-chat-container" class="w-full max-w-4xl h-1/2 flex flex-col glass-effect rounded-2xl">
@@ -121,7 +117,6 @@
         </footer>
     </div>
 
-    <!-- Página de Análise (Foco no Raio-X) -->
     <div id="analysis-page" class="hidden h-screen flex-col relative">
         <header class="glass-effect m-2.5 rounded-2xl flex justify-between items-center z-10 p-4">
             <div class="flex items-center space-x-3">
@@ -439,51 +434,70 @@
                 addHtmlToAllChats(msgHtml);
             }
 
+            // ==================================================================
+            // INÍCIO DA SEÇÃO CORRIGIDA
+            // ==================================================================
             async function handleUserMessage(inputEl) {
                 const message = inputEl.value.trim();
                 if (!message) return;
+
                 addUserMessage(message);
                 chatInputs.forEach(input => input.value = '');
-                const thinkingEl = addBotMessage('', true);
+                addBotMessage('', true); // Mostra o balão "pensando..."
                 
+                // Constrói o prompt e o histórico para enviar ao backend
                 let prompt;
-                if(analysisResults.length > 0) {
+                if (analysisResults.length > 0) {
                     const findingsContext = analysisResults.map(f => `- ${f.label} (Confiança: ${(f.confidence*100).toFixed(0)}%)`).join('\n');
                     prompt = `Você é a RadiologIA, uma IA assistente para dentistas. Seja profissional, conciso e responda sempre em português do Brasil. Com base nos achados radiográficos abaixo, responda à pergunta do usuário.\n\nAchados detectados:\n${findingsContext}\n\nPergunta: "${message}"`;
                 } else {
                     prompt = `Você é a RadiologIA, uma IA assistente para dentistas. Seja profissional, conciso e responda sempre em português do Brasil. Responda à seguinte pergunta geral de odontologia: "${message}"`;
                 }
-
+                
+                chatHistory.push({ role: "user", parts: [{ text: prompt }] });
+                
                 try {
-                    const apiKey = "AIzaSyA_MdGZDzcmYVGntNJ7Btug2u-jhuVxGyw"; 
-                    if (!apiKey) {
-                        throw new Error("A chave da API está faltando. Adicione sua chave da API do Gemini ao script.");
-                    }
-                    chatHistory.push({ role: "user", parts: [{ text: prompt }] });
-                    const payload = { contents: chatHistory };
-                    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-                    const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                    // A chamada agora é para o nosso backend seguro, na rota /chat
+                    const response = await fetch('/chat', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        // Enviamos o histórico completo para o backend
+                        body: JSON.stringify({ history: chatHistory }) 
+                    });
+
+                    // Remove o balão "pensando" assim que a resposta chegar
+                    document.querySelectorAll('.thinking-bubble').forEach(el => {
+                        const wrapper = el.closest('.flex.justify-start');
+                        if (wrapper) wrapper.remove();
+                    });
+
                     if (!response.ok) {
                         const errorBody = await response.json();
-                        throw new Error(`Erro da API: ${errorBody.error.message}`);
+                        throw new Error(errorBody.error || `Erro do servidor: ${response.statusText}`);
                     }
                     const result = await response.json();
                     
-                    document.querySelectorAll('.thinking-bubble-wrapper').forEach(el => el.parentElement.parentElement.remove());
-
                     if (result.candidates && result.candidates.length > 0 && result.candidates[0].content.parts[0].text) {
                         const botResponse = result.candidates[0].content.parts[0].text.replace(/\*/g, '');
                         addBotMessage(botResponse);
+                        // Adiciona a resposta do modelo ao histórico para manter o contexto da conversa
                         chatHistory.push({ role: "model", parts: [{ text: botResponse }] });
                     } else { 
-                        throw new Error("Formato de resposta da IA inválido."); 
+                        throw new Error("Formato de resposta da IA inválido recebido do backend."); 
                     }
                 } catch (error) {
-                    console.error("Erro ao chamar a API do Gemini:", error);
-                    document.querySelectorAll('.thinking-bubble-wrapper').forEach(el => el.parentElement.parentElement.remove());
-                    addBotMessage(`<b>Falha na Conexão com a IA:</b> Não foi possível processar sua solicitação. Verifique a chave da API e sua conexão.`);
+                    console.error("Erro ao chamar o backend:", error);
+                    // Remove o balão "pensando" em caso de erro também
+                     document.querySelectorAll('.thinking-bubble').forEach(el => {
+                        const wrapper = el.closest('.flex.justify-start');
+                        if (wrapper) wrapper.remove();
+                    });
+                    addBotMessage(`<b>Falha na Conexão:</b> Não foi possível processar sua solicitação. (${error.message})`);
                 }
             }
+            // ==================================================================
+            // FIM DA SEÇÃO CORRIGIDA
+            // ==================================================================
             
             function initializeChat() {
                  chatSends.forEach((button, index) => {

@@ -304,7 +304,7 @@
             let activeFinding = null; // Achado clicado
             let hoveredFinding = null; // Achado sob o mouse
 
-            // --- CORREÇÃO: Mapa de Labels (Tradução) ---
+            // --- Mapa de Labels (Tradução) ---
             const labelMap = {
                 "carie": "Cárie",
                 "lesao_periapical": "Lesão Periapical",
@@ -319,7 +319,7 @@
                 "pre_molar_inf": "Pré-Molar Inferior",
                 "molar_sup": "Molar Superior",
                 "molar_inf": "Molar Inferior",
-                "filling": "Restauração" // Mapeamento explícito para "Filling"
+                "filling": "Restauração"
             };
 
             const getFriendlyLabel = (label) => labelMap[label.toLowerCase()] || label.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
@@ -373,6 +373,8 @@
 
             window.addEventListener('resize', () => {
                 adjustCanvasToImage();
+                // Otimização: recalcula os polígonos suavizados no resize
+                processAnalysisResults(analysisResults);
                 redrawAllAnnotations();
             });
 
@@ -415,8 +417,8 @@
                     const response = await fetch('/analyze', { method: 'POST', body: formData });
                     if (!response.ok) throw new Error(`Erro HTTP! status: ${response.status}`);
                     const data = await response.json();
-                    analysisResults = data.findings;
-                    displayFindingsList(analysisResults);
+                    processAnalysisResults(data.findings); // Processa e suaviza os resultados
+                    displayFindingsList();
                 } catch (error) {
                     console.error('Erro ao analisar imagem:', error);
                     addBotMessage(`<b>Falha na Conexão:</b> Não foi possível conectar ao servidor de análise.`);
@@ -427,12 +429,41 @@
             });
 
             // --- Funções de Desenho e Interatividade ---
-            function displayFindingsList(findings) {
-                const findingsCount = findings.length;
+
+            function smoothPolygon(points, iterations = 2) {
+                if (!points || points.length < 3) return points;
+                let inputPoints = points;
+                for (let i = 0; i < iterations; i++) {
+                    const outputPoints = [];
+                    for (let j = 0; j < inputPoints.length; j++) {
+                        const p0 = inputPoints[j];
+                        const p1 = inputPoints[(j + 1) % inputPoints.length];
+                        outputPoints.push([p0[0] * 0.75 + p1[0] * 0.25, p0[1] * 0.75 + p1[1] * 0.25]);
+                        outputPoints.push([p0[0] * 0.25 + p1[0] * 0.75, p0[1] * 0.25 + p1[1] * 0.75]);
+                    }
+                    inputPoints = outputPoints;
+                }
+                return inputPoints;
+            }
+            
+            // Otimização: Pré-calcula os polígonos suavizados
+            function processAnalysisResults(findings) {
+                const { width, height } = canvas;
+                if (!width || !height) return;
+
+                analysisResults = findings.map(finding => {
+                    const rawPolygon = finding.segmentation.map(p => [p[0]/100 * width, p[1]/100 * height]);
+                    const smoothedPolygon = smoothPolygon(rawPolygon);
+                    return { ...finding, smoothedPolygon }; // Armazena o polígono suavizado
+                });
+            }
+
+            function displayFindingsList() {
+                const findingsCount = analysisResults.length;
                 let message = `Análise completa. Identifiquei ${findingsCount} achado(s). Clique para dar zoom ou passe o mouse na imagem para destacar.`;
                 if(findingsCount === 0) { message = "Análise completa. Nenhum achado detectado."; }
                 
-                let findingsHtml = `<div class="glass-effect rounded-lg p-3 w-full"><p class="mb-3">${message}</p><div class="space-y-2">${findings.map(finding => `<div class="finding-item bg-white/20 p-2 rounded-md flex justify-between items-center" data-finding-id="${finding.id}"><span>${getFriendlyLabel(finding.label)}</span><span class="text-xs text-slate-600">${(finding.confidence * 100).toFixed(0)}%</span></div>`).join('')}</div></div>`;
+                let findingsHtml = `<div class="glass-effect rounded-lg p-3 w-full"><p class="mb-3">${message}</p><div class="space-y-2">${analysisResults.map(finding => `<div class="finding-item bg-white/20 p-2 rounded-md flex justify-between items-center" data-finding-id="${finding.id}"><span>${getFriendlyLabel(finding.label)}</span><span class="text-xs text-slate-600">${(finding.confidence * 100).toFixed(0)}%</span></div>`).join('')}</div></div>`;
                 addHtmlMessage(findingsHtml, analysisChatContainerEl.querySelector('.chat-container'));
 
                 document.querySelectorAll('.finding-item').forEach(item => {
@@ -444,16 +475,12 @@
                 });
             }
             
-            function drawMask(finding, fillStyle, strokeStyle, lineWidth = 2) {
-                if (!finding || !finding.segmentation) return;
-                const { width, height } = canvas;
-                const points = finding.segmentation.map(p => [(p[0]/100) * width, (p[1]/100) * height]);
-                
+            function drawMask(smoothedPoints, fillStyle, strokeStyle, lineWidth = 2) {
+                if (!smoothedPoints || smoothedPoints.length === 0) return;
                 ctx.beginPath();
-                ctx.moveTo(points[0][0], points[0][1]);
-                for (let i = 1; i < points.length; i++) { ctx.lineTo(points[i][0], points[i][1]); }
+                ctx.moveTo(smoothedPoints[0][0], smoothedPoints[0][1]);
+                for (let i = 1; i < smoothedPoints.length; i++) { ctx.lineTo(smoothedPoints[i][0], smoothedPoints[i][1]); }
                 ctx.closePath();
-
                 ctx.fillStyle = fillStyle;
                 ctx.strokeStyle = strokeStyle;
                 ctx.lineWidth = lineWidth;
@@ -465,38 +492,25 @@
                 ctx.clearRect(0, 0, canvas.width, canvas.height); 
             }
 
-            // --- CORREÇÃO: Lógica de redesenho com Spotlight ---
             function redrawAllAnnotations() {
                 clearCanvas();
-
-                // Efeito Spotlight para o 'hoveredFinding'
                 if (hoveredFinding) {
                     ctx.save();
-                    // 1. Preenche o canvas com uma camada escura
                     ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
                     ctx.fillRect(0, 0, canvas.width, canvas.height);
-                    
-                    // 2. "Corta" a área da máscara do achado em hover
                     ctx.globalCompositeOperation = 'destination-out';
-                    drawMask(hoveredFinding, "white", "transparent");
-                    
-                    // 3. Restaura o modo de desenho para desenhar por cima
+                    drawMask(hoveredFinding.smoothedPolygon, "white", "transparent");
                     ctx.restore();
-
-                    // 4. Desenha a máscara do hover novamente, mas colorida, para dar o destaque
-                    drawMask(hoveredFinding, "rgba(56, 189, 248, 0.4)", '#38bdf8', 3);
+                    drawMask(hoveredFinding.smoothedPolygon, "rgba(56, 189, 248, 0.4)", '#38bdf8', 3);
                 }
-                
-                // Desenha o 'activeFinding' (clicado/zoom) por cima de tudo, se existir
                 if (activeFinding) {
-                    drawMask(activeFinding, "rgba(251, 146, 60, 0.4)", '#fb923c', 3);
+                    drawMask(activeFinding.smoothedPolygon, "rgba(251, 146, 60, 0.4)", '#fb923c', 3);
                 }
             }
 
-            // --- CORREÇÃO: Lógica de Zoom ---
             function zoomToFinding(finding) {
                 activeFinding = finding;
-                const { clientWidth, clientHeight } = radiographImg; // Usar dimensões da imagem real
+                const { clientWidth, clientHeight } = radiographImg;
                 const { segmentation } = finding;
                 
                 const xCoords = segmentation.map(p => p[0]);
@@ -510,8 +524,8 @@
                 const centerY = (minY + maxY) / 2;
 
                 const zoomLevel = 2;
-                const newX = -(centerX * clientWidth * zoomLevel - clientWidth / 2);
-                const newY = -(centerY * clientHeight * zoomLevel - clientHeight / 2);
+                const newX = -(centerX * clientWidth * zoomLevel - imageZoomContainer.clientWidth / 2);
+                const newY = -(centerY * clientHeight * zoomLevel - imageZoomContainer.clientHeight / 2);
 
                 imageZoomContainer.style.transform = `scale(${zoomLevel}) translate(${newX / zoomLevel}px, ${newY / zoomLevel}px)`;
                 resetZoomBtn.classList.remove('hidden');
@@ -526,8 +540,8 @@
             }
             resetZoomBtn.addEventListener('click', resetZoom);
 
-            // --- Lógica de Destaque na Imagem ---
             function isPointInPolygon(point, polygon) {
+                if (!polygon) return false;
                 let isInside = false;
                 const { x, y } = point;
                 for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
@@ -544,10 +558,8 @@
                 const mousePoint = { x: e.clientX - rect.left, y: e.clientY - rect.top };
                 
                 let foundFinding = null;
-                // Itera em ordem reversa para que os achados menores (desenhados por último) sejam detectados primeiro
                 for (const finding of [...analysisResults].reverse()) {
-                    const polygon = finding.segmentation.map(p => [(p[0]/100) * canvas.width, (p[1]/100) * canvas.height]);
-                    if (isPointInPolygon(mousePoint, polygon)) {
+                    if (isPointInPolygon(mousePoint, finding.smoothedPolygon)) {
                         foundFinding = finding;
                         break;
                     }

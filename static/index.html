@@ -34,14 +34,29 @@
         .chat-container::-webkit-scrollbar { width: 6px; }
         .chat-container::-webkit-scrollbar-track { background: transparent; }
         .chat-container::-webkit-scrollbar-thumb { background-color: rgba(0, 0, 0, 0.2); border-radius: 20px; }
-        #image-container { position: relative; width: 100%; height: 100%; overflow: hidden; display: flex; justify-content: center; align-items: center; }
-        #radiograph-img { max-width: 100%; max-height: 100%; object-fit: contain; }
         
-        /* --- MELHORIA NÍVEL 1 --- */
+        #viewer-panel { overflow: hidden; } /* Essencial para conter o zoom */
+
+        #image-zoom-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: transform 0.4s ease-in-out; /* Animação do zoom */
+        }
+        
+        #radiograph-img { 
+            max-width: 100%; 
+            max-height: 100%; 
+            object-fit: contain;
+        }
+        
         #overlay-canvas { 
             position: absolute; 
-            pointer-events: none; 
-            transition: opacity 0.3s ease; /* Adiciona transição suave */
+            pointer-events: auto; /* Permite eventos de mouse no canvas */
+            transition: opacity 0.3s ease;
         }
 
         .loader { border-top-color: #38bdf8; animation: spin 1s linear infinite; }
@@ -71,7 +86,8 @@
         }
         
         .finding-item { cursor: pointer; transition: background-color 0.2s; }
-        .finding-item:hover { background-color: rgba(56, 189, 248, 0.2); }
+        .finding-item.highlighted { background-color: rgba(56, 189, 248, 0.3); }
+
         .thinking-bubble { display: flex; align-items: center; }
         .thinking-bubble span { height: 8px; width: 8px; margin: 0 2px; background-color: #475569; border-radius: 50%; display: inline-block; animation: bounce 1.4s infinite ease-in-out both; }
         .thinking-bubble .bounce1 { animation-delay: -0.32s; }
@@ -134,22 +150,23 @@
                     Carregar Nova
                 </label>
                 <input type="file" id="image-upload-analysis" class="hidden" accept="image/*">
-                <button id="analyze-btn" class="glass-button py-2 px-5 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed" disabled>
-                    Analisar Imagem
-                </button>
+                <button id="analyze-btn" class="hidden">Analisar</button> <!-- Botão agora é oculto -->
             </div>
         </header>
 
         <main class="flex-grow flex flex-col md:flex-row overflow-hidden p-2.5 pt-0 gap-2.5">
-            <div id="viewer-panel" class="w-full md:w-2/3 h-1/2 md:h-full glass-effect rounded-2xl p-4 flex flex-col items-center justify-center relative overflow-hidden">
-                <div id="image-container" class="hidden">
-                    <img id="radiograph-img" alt="Radiografia a ser analisada" class="rounded-md shadow-lg">
-                    <canvas id="overlay-canvas"></canvas>
-                </div>
-                 <div id="viewer-placeholder" class="text-center text-slate-500 flex flex-col justify-center items-center">
+            <div id="viewer-panel" class="w-full md:w-2/3 h-1/2 md:h-full glass-effect rounded-2xl p-4 flex flex-col items-center justify-center relative">
+                 <div id="viewer-placeholder" class="text-center text-slate-500 flex flex-col justify-center items-center z-0">
                     <svg xmlns="http://www.w3.org/2000/svg" class="mx-auto h-16 w-16 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.158 0L10.5 9.75M10.5 12a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" /></svg>
                     <p class="mt-4 text-lg">Carregue uma radiografia para começar.</p>
                 </div>
+                <div id="image-zoom-container">
+                    <img id="radiograph-img" alt="Radiografia a ser analisada" class="rounded-md shadow-lg hidden">
+                    <canvas id="overlay-canvas"></canvas>
+                </div>
+                <button id="reset-zoom-btn" class="hidden absolute bottom-6 right-6 glass-button rounded-full p-3 z-20">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-6 w-6"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="m3 15 4-4"/><path d="m21 9-4 4"/></svg>
+                </button>
                 <div id="loader" class="hidden absolute inset-0 glass-effect flex-col items-center justify-center z-20">
                     <div class="loader ease-linear rounded-full border-8 border-t-8 border-gray-400 h-24 w-24 mb-4"></div>
                     <p class="text-xl font-semibold">Analisando com IA...</p>
@@ -196,9 +213,9 @@
 
             const shapeTypes = ['circle', 'square', 'triangle'];
             const colors = [
-                'rgba(179, 209, 255, 0.5)', // Azul pastel
-                'rgba(194, 230, 208, 0.5)', // Verde pastel
-                'rgba(255, 249, 196, 0.5)'  // Amarelo pastel
+                'rgba(179, 209, 255, 0.5)', 
+                'rgba(194, 230, 208, 0.5)',
+                'rgba(255, 249, 196, 0.5)'
             ];
             const shapeCount = 12;
 
@@ -259,45 +276,54 @@
 
             const DEMO_PASSWORD = 'rad2025'; 
 
+            // --- Elementos da UI ---
             const loginPage = document.getElementById('login-page');
             const welcomePage = document.getElementById('welcome-page');
             const analysisPage = document.getElementById('analysis-page');
-            
             const passwordInput = document.getElementById('password-input');
             const loginButton = document.getElementById('login-button');
             const errorMessage = document.getElementById('error-message');
-
             const welcomeChatContainerEl = document.getElementById('welcome-chat-container');
             const analysisChatContainerEl = document.getElementById('analysis-chat-container');
             const chatTemplate = document.getElementById('chat-template');
-            welcomeChatContainerEl.innerHTML = chatTemplate.innerHTML;
-            analysisChatContainerEl.innerHTML = chatTemplate.innerHTML;
-            
-            const chatContainers = document.querySelectorAll('.chat-container');
-            const chatInputs = document.querySelectorAll('.chat-input');
-            const chatSends = document.querySelectorAll('.chat-send');
-
             const imageUploadWelcome = document.getElementById('image-upload-welcome');
             const imageUploadAnalysis = document.getElementById('image-upload-analysis');
+            const imageZoomContainer = document.getElementById('image-zoom-container');
             const radiographImg = document.getElementById('radiograph-img');
-            const imageContainer = document.getElementById('image-container');
             const viewerPlaceholder = document.getElementById('viewer-placeholder');
             const analyzeBtn = document.getElementById('analyze-btn');
             const loader = document.getElementById('loader');
             const canvas = document.getElementById('overlay-canvas');
             const ctx = canvas.getContext('2d');
+            const resetZoomBtn = document.getElementById('reset-zoom-btn');
             
+            // --- Estado da Aplicação ---
             let analysisResults = [];
             let currentImageFile = null;
             let chatHistory = [];
-            let activeFinding = null;
+            let activeFinding = null; // Achado clicado
+            let hoveredFinding = null; // Achado sob o mouse
 
+            // --- Mapa de Labels (Tradução) ---
+            const labelMap = {
+                "carie": "Cárie",
+                "lesao_periapical": "Lesão Periapical",
+                "calculo_dental": "Cálculo Dental",
+                "restauracao": "Restauração",
+                "dente_ausente": "Dente Ausente",
+                "implante": "Implante",
+                "coroa": "Coroa",
+            };
+
+            const getFriendlyLabel = (label) => labelMap[label] || label.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+
+            // --- Lógica de Login ---
             const handleLogin = () => {
                 if (passwordInput.value === DEMO_PASSWORD) {
                     loginPage.classList.add('hidden');
                     welcomePage.classList.remove('hidden');
                     welcomePage.classList.add('flex');
-                    initializeChat();
+                    initializeChat(welcomeChatContainerEl, true);
                 } else {
                     errorMessage.textContent = 'Senha incorreta.';
                     passwordInput.classList.add('shake');
@@ -311,14 +337,15 @@
             loginButton.addEventListener('click', handleLogin);
             passwordInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') handleLogin(); });
 
+            // --- Lógica de Visualização e Canvas ---
             const initViewer = (imgSrc) => {
                 viewerPlaceholder.classList.add('hidden');
-                imageContainer.classList.remove('hidden');
                 radiographImg.src = imgSrc;
-                analyzeBtn.disabled = false;
+                radiographImg.classList.remove('hidden');
+                
                 radiographImg.onload = () => {
                     adjustCanvasToImage();
-                    if (activeFinding) drawFinding(activeFinding, true);
+                    analyzeBtn.click(); // Inicia a análise automaticamente
                 };
             };
             
@@ -326,8 +353,9 @@
                 const img = radiographImg;
                 const { clientWidth, clientHeight } = img;
                 if (!clientWidth || !clientHeight) return;
-                const top = (imageContainer.clientHeight - clientHeight) / 2;
-                const left = (imageContainer.clientWidth - clientWidth) / 2;
+                const container = imageZoomContainer;
+                const top = (container.clientHeight - clientHeight) / 2;
+                const left = (container.clientWidth - clientWidth) / 2;
                 canvas.style.width = `${clientWidth}px`;
                 canvas.style.height = `${clientHeight}px`;
                 canvas.style.top = `${top}px`;
@@ -336,21 +364,33 @@
                 canvas.height = clientHeight;
             };
 
-            window.addEventListener('resize', adjustCanvasToImage);
+            window.addEventListener('resize', () => {
+                adjustCanvasToImage();
+                redrawAllAnnotations();
+            });
 
+            // --- Lógica de Upload e Análise ---
             const handleFileUpload = (e) => {
                 const file = e.target.files[0];
                 if (file) {
+                    // --- CORREÇÃO: Reset completo do estado da análise ---
                     currentImageFile = file;
+                    analysisResults = [];
+                    chatHistory = [];
+                    activeFinding = null;
+                    hoveredFinding = null;
+                    
+                    // Limpa a interface do chat de análise
+                    const chatContainer = analysisChatContainerEl.querySelector('.chat-container');
+                    if (chatContainer) chatContainer.innerHTML = '';
+                    
                     const reader = new FileReader();
                     reader.onload = (event) => {
                         welcomePage.classList.add('hidden');
                         analysisPage.classList.remove('hidden');
                         analysisPage.classList.add('flex');
+                        resetZoom();
                         initViewer(event.target.result);
-                        clearCanvas();
-                        // --- REMOVIDO: Análise automática ---
-                        // analyzeBtn.click(); 
                     }
                     reader.readAsDataURL(file);
                 }
@@ -364,15 +404,11 @@
                 loader.classList.remove('hidden');
                 loader.classList.add('flex');
                 clearCanvas();
-                activeFinding = null; // Reseta o achado ativo
                 const formData = new FormData();
                 formData.append('file', currentImageFile);
                 try {
                     const response = await fetch('/analyze', { method: 'POST', body: formData });
-                    if (!response.ok) {
-                        const errorData = await response.json();
-                        throw new Error(errorData.error || `Erro HTTP! status: ${response.status}`);
-                    }
+                    if (!response.ok) throw new Error(`Erro HTTP! status: ${response.status}`);
                     const data = await response.json();
                     analysisResults = data.findings;
                     displayFindingsList(analysisResults);
@@ -385,75 +421,26 @@
                 }
             });
 
-            // --- FUNÇÃO ALTERADA ---
+            // --- Funções de Desenho e Interatividade ---
             function displayFindingsList(findings) {
                 const findingsCount = findings.length;
-                let message = `Análise completa. Identifiquei ${findingsCount} achado(s). Passe o mouse ou clique para visualizar.`;
+                let message = `Análise completa. Identifiquei ${findingsCount} achado(s). Clique para dar zoom ou passe o mouse na imagem para destacar.`;
                 if(findingsCount === 0) { message = "Análise completa. Nenhum achado detectado."; }
                 
-                let findingsHtml = `<div class="glass-effect rounded-lg p-3 w-full"><p class="mb-3">${message}</p><div class="space-y-2">${findings.map(finding => `<div class="finding-item bg-white/20 p-2 rounded-md flex justify-between items-center" data-finding-id="${finding.id}"><span>${finding.label}</span><span class="text-xs text-slate-600">${(finding.confidence * 100).toFixed(0)}%</span></div>`).join('')}</div></div>`;
-                addHtmlToAllChats(findingsHtml);
+                let findingsHtml = `<div class="glass-effect rounded-lg p-3 w-full"><p class="mb-3">${message}</p><div class="space-y-2">${findings.map(finding => `<div class="finding-item bg-white/20 p-2 rounded-md flex justify-between items-center" data-finding-id="${finding.id}"><span>${getFriendlyLabel(finding.label)}</span><span class="text-xs text-slate-600">${(finding.confidence * 100).toFixed(0)}%</span></div>`).join('')}</div></div>`;
+                addHtmlMessage(findingsHtml, analysisChatContainerEl.querySelector('.chat-container'));
 
                 document.querySelectorAll('.finding-item').forEach(item => {
-                    const findingId = item.dataset.findingId;
-                    const finding = analysisResults.find(f => f.id === findingId);
-
-                    // --- MELHORIA NÍVEL 1: Hover-to-Highlight ---
-                    item.addEventListener('mouseenter', () => {
-                        if (finding) {
-                           drawFinding(finding, false); // 'false' para não aplicar o holofote
-                        }
-                    });
-
-                    item.addEventListener('mouseleave', () => {
-                        clearCanvas();
-                        // Se houver um achado ativo (clicado), redesenha-o
-                        if (activeFinding) {
-                            drawFinding(activeFinding, true);
-                        }
-                    });
-
-                    // --- MELHORIA NÍVEL 1: Click-to-Spotlight ---
                     item.addEventListener('click', () => {
-                        activeFinding = finding;
-                        if (activeFinding) {
-                            drawFinding(activeFinding, true); // 'true' para aplicar o holofote
-                        }
+                        const findingId = item.dataset.findingId;
+                        const finding = analysisResults.find(f => f.id === findingId);
+                        if(finding) zoomToFinding(finding);
                     });
                 });
             }
             
-            // --- FUNÇÃO ALTERADA ---
-            // Desenha o achado. O parâmetro 'spotlight' controla o efeito de holofote.
-            function drawFinding(findingToDraw, spotlight = false) {
-                clearCanvas();
-                adjustCanvasToImage();
-                
-                if (spotlight) {
-                    // Efeito Holofote: desenha uma sobreposição escura
-                    ctx.save();
-                    ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
-                    ctx.fillRect(0, 0, canvas.width, canvas.height);
-                    
-                    // Usa 'destination-out' para "cortar" a forma da máscara da sobreposição
-                    ctx.globalCompositeOperation = 'destination-out';
-                }
-
-                // Desenha a máscara (seja para cortar o holofote ou para destacar)
-                drawMask(findingToDraw, "white", "transparent");
-
-                if (spotlight) {
-                    // Restaura o contexto para desenhar a borda colorida por cima
-                    ctx.restore();
-                    // Desenha a máscara novamente, mas agora com a borda colorida
-                    drawMask(findingToDraw, "rgba(251, 146, 60, 0.4)", '#fb923c');
-                }
-            }
-
-            // --- NOVA FUNÇÃO ---
-            // Função reutilizável para desenhar a forma da máscara
-            function drawMask(finding, fillStyle, strokeStyle) {
-                 if (!finding || !finding.segmentation) return;
+            function drawMask(finding, fillStyle, strokeStyle, lineWidth = 2) {
+                if (!finding || !finding.segmentation) return;
                 const { width, height } = canvas;
                 const points = finding.segmentation.map(p => [(p[0]/100) * width, (p[1]/100) * height]);
                 
@@ -464,36 +451,124 @@
 
                 ctx.fillStyle = fillStyle;
                 ctx.strokeStyle = strokeStyle;
-                ctx.lineWidth = 2;
+                ctx.lineWidth = lineWidth;
                 ctx.stroke();
                 ctx.fill();
             }
 
-            // --- FUNÇÃO ALTERADA ---
             function clearCanvas() { 
                 ctx.clearRect(0, 0, canvas.width, canvas.height); 
             }
 
-            function addHtmlToAllChats(html) {
-                 chatContainers.forEach(container => {
-                    container.insertAdjacentHTML('beforeend', `<div>${html}</div>`);
-                    container.scrollTop = container.scrollHeight;
-                });
+            function redrawAllAnnotations() {
+                clearCanvas();
+                if (activeFinding) {
+                    drawMask(activeFinding, "rgba(251, 146, 60, 0.4)", '#fb923c', 3);
+                }
+                if (hoveredFinding && hoveredFinding.id !== activeFinding?.id) {
+                    drawMask(hoveredFinding, "rgba(56, 189, 248, 0.4)", '#38bdf8', 3);
+                }
+            }
+
+            // --- Lógica de Zoom ---
+            function zoomToFinding(finding) {
+                activeFinding = finding;
+                const { width, height } = imageZoomContainer.getBoundingClientRect();
+                const { segmentation } = finding;
+                
+                const xCoords = segmentation.map(p => p[0]);
+                const yCoords = segmentation.map(p => p[1]);
+                const minX = Math.min(...xCoords) / 100;
+                const maxX = Math.max(...xCoords) / 100;
+                const minY = Math.min(...yCoords) / 100;
+                const maxY = Math.max(...yCoords) / 100;
+
+                const centerX = (minX + maxX) / 2;
+                const centerY = (minY + maxY) / 2;
+
+                const zoomLevel = 2;
+                const newX = -(centerX * width * zoomLevel - width / 2);
+                const newY = -(centerY * height * zoomLevel - height / 2);
+
+                imageZoomContainer.style.transform = `scale(${zoomLevel}) translate(${newX / zoomLevel}px, ${newY / zoomLevel}px)`;
+                resetZoomBtn.classList.remove('hidden');
+                redrawAllAnnotations();
+            }
+
+            function resetZoom() {
+                activeFinding = null;
+                imageZoomContainer.style.transform = 'scale(1) translate(0, 0)';
+                resetZoomBtn.classList.add('hidden');
+                redrawAllAnnotations();
+            }
+            resetZoomBtn.addEventListener('click', resetZoom);
+
+            // --- Lógica de Destaque na Imagem ---
+            function isPointInPolygon(point, polygon) {
+                let isInside = false;
+                const { x, y } = point;
+                for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+                    const xi = polygon[i][0], yi = polygon[i][1];
+                    const xj = polygon[j][0], yj = polygon[j][1];
+                    const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+                    if (intersect) isInside = !isInside;
+                }
+                return isInside;
+            }
+
+            canvas.addEventListener('mousemove', (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const mousePoint = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+                
+                let foundFinding = null;
+                for (const finding of analysisResults) {
+                    const polygon = finding.segmentation.map(p => [(p[0]/100) * canvas.width, (p[1]/100) * canvas.height]);
+                    if (isPointInPolygon(mousePoint, polygon)) {
+                        foundFinding = finding;
+                        break;
+                    }
+                }
+
+                document.querySelectorAll('.finding-item').forEach(item => item.classList.remove('highlighted'));
+
+                if (foundFinding) {
+                    if (hoveredFinding?.id !== foundFinding.id) {
+                        hoveredFinding = foundFinding;
+                        const listItem = document.querySelector(`.finding-item[data-finding-id="${foundFinding.id}"]`);
+                        if (listItem) listItem.classList.add('highlighted');
+                        redrawAllAnnotations();
+                    }
+                } else {
+                    if (hoveredFinding) {
+                        hoveredFinding = null;
+                        redrawAllAnnotations();
+                    }
+                }
+            });
+
+            // --- Funções de Chat ---
+            function addHtmlMessage(html, chatContainer) {
+                 if(chatContainer) {
+                    chatContainer.insertAdjacentHTML('beforeend', `<div>${html}</div>`);
+                    chatContainer.scrollTop = chatContainer.scrollHeight;
+                 }
             }
 
             function addBotMessage(message, thinking=false) {
+                const chatContainer = analysisChatContainerEl.querySelector('.chat-container');
                 let msgHtml;
                 if(thinking) {
                     msgHtml = `<div class="flex justify-start"><div class="glass-effect rounded-lg p-3 max-w-sm"><div class="thinking-bubble"><span class="bounce1"></span><span class="bounce2"></span><span class="bounce3"></span></div></div></div>`;
                 } else {
                      msgHtml = `<div class="flex justify-start"><div class="glass-effect rounded-lg p-3 max-w-sm"><p class="text-slate-800">${message}</p></div></div>`;
                 }
-                addHtmlToAllChats(msgHtml);
+                addHtmlMessage(msgHtml, chatContainer);
             }
 
             function addUserMessage(message) {
+                const chatContainer = analysisChatContainerEl.querySelector('.chat-container');
                 const msgHtml = `<div class="flex justify-end"><div class="bg-blue-500 text-white rounded-lg p-3 max-w-sm"><p>${message}</p></div></div>`;
-                addHtmlToAllChats(msgHtml);
+                addHtmlMessage(msgHtml, chatContainer);
             }
 
             async function handleUserMessage(inputEl) {
@@ -501,12 +576,12 @@
                 if (!message) return;
 
                 addUserMessage(message);
-                chatInputs.forEach(input => input.value = '');
+                document.querySelectorAll('.chat-input').forEach(input => input.value = '');
                 addBotMessage('', true); 
                 
                 let prompt;
                 if (analysisResults.length > 0) {
-                    const findingsContext = analysisResults.map(f => `- ${f.label} (Confiança: ${(f.confidence*100).toFixed(0)}%)`).join('\n');
+                    const findingsContext = analysisResults.map(f => `- ${getFriendlyLabel(f.label)} (Confiança: ${(f.confidence*100).toFixed(0)}%)`).join('\n');
                     prompt = `Você é a RadiologIA, uma IA assistente para dentistas. Seja profissional, conciso e responda sempre em português do Brasil. Com base nos achados radiográficos abaixo, responda à pergunta do usuário.\n\nAchados detectados:\n${findingsContext}\n\nPergunta: "${message}"`;
                 } else {
                     prompt = `Você é a RadiologIA, uma IA assistente para dentistas. Seja profissional, conciso e responda sempre em português do Brasil. Responda à seguinte pergunta geral de odontologia: "${message}"`;
@@ -521,49 +596,47 @@
                         body: JSON.stringify({ history: chatHistory }) 
                     });
 
-                    document.querySelectorAll('.thinking-bubble').forEach(el => {
-                        const wrapper = el.closest('.flex.justify-start');
-                        if (wrapper) wrapper.remove();
-                    });
+                    document.querySelectorAll('.thinking-bubble').forEach(el => el.closest('.flex.justify-start')?.remove());
 
-                    if (!response.ok) {
-                        const errorBody = await response.json();
-                        throw new Error(errorBody.error || `Erro do servidor: ${response.statusText}`);
-                    }
+                    if (!response.ok) throw new Error((await response.json()).error || 'Erro do servidor');
+                    
                     const result = await response.json();
                     
-                    if (result.candidates && result.candidates.length > 0 && result.candidates[0].content.parts[0].text) {
+                    if (result.candidates?.[0]?.content?.parts?.[0]?.text) {
                         const botResponse = result.candidates[0].content.parts[0].text.replace(/\*/g, '');
                         addBotMessage(botResponse);
                         chatHistory.push({ role: "model", parts: [{ text: botResponse }] });
                     } else { 
-                        throw new Error("Formato de resposta da IA inválido recebido do backend."); 
+                        throw new Error("Formato de resposta da IA inválido."); 
                     }
                 } catch (error) {
                     console.error("Erro ao chamar o backend:", error);
-                     document.querySelectorAll('.thinking-bubble').forEach(el => {
-                        const wrapper = el.closest('.flex.justify-start');
-                        if (wrapper) wrapper.remove();
-                    });
+                    document.querySelectorAll('.thinking-bubble').forEach(el => el.closest('.flex.justify-start')?.remove());
                     addBotMessage(`<b>Falha na Conexão:</b> Não foi possível processar sua solicitação. (${error.message})`);
                 }
             }
             
-            function initializeChat() {
-                 chatSends.forEach((button, index) => {
-                    button.addEventListener('click', () => handleUserMessage(chatInputs[index]));
-                });
-                chatInputs.forEach(input => {
-                    input.addEventListener('keydown', (e) => {
-                        if (e.key === 'Enter') {
-                            e.preventDefault();
-                            handleUserMessage(input);
-                        }
-                    });
-                });
-                chatHistory = [];
-                addBotMessage("Olá! Sou seu IAssistente. Pode me fazer uma pergunta sobre odontologia ou carregar uma radiografia para análise.");
+            function initializeChat(containerEl, isWelcome) {
+                 containerEl.innerHTML = chatTemplate.innerHTML;
+                 const chatInput = containerEl.querySelector('.chat-input');
+                 const chatSendBtn = containerEl.querySelector('.chat-send');
+                 
+                 chatSendBtn.addEventListener('click', () => handleUserMessage(chatInput));
+                 chatInput.addEventListener('keydown', (e) => {
+                     if (e.key === 'Enter') {
+                         e.preventDefault();
+                         handleUserMessage(chatInput);
+                     }
+                 });
+
+                 if (isWelcome) {
+                    chatHistory = [];
+                    addHtmlMessage(`<div class="flex justify-start"><div class="glass-effect rounded-lg p-3 max-w-sm"><p class="text-slate-800">Olá! Sou seu IAssistente. Pode me fazer uma pergunta sobre odontologia ou carregar uma radiografia para análise.</p></div></div>`, containerEl.querySelector('.chat-container'));
+                 }
             }
+
+            initializeChat(welcomeChatContainerEl, true);
+            initializeChat(analysisChatContainerEl, false);
 
         });
     </script>

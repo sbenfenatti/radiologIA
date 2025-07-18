@@ -304,7 +304,7 @@
             let activeFinding = null; // Achado clicado
             let hoveredFinding = null; // Achado sob o mouse
 
-            // --- Mapa de Labels (Tradução) ---
+            // --- CORREÇÃO: Mapa de Labels (Tradução) ---
             const labelMap = {
                 "carie": "Cárie",
                 "lesao_periapical": "Lesão Periapical",
@@ -313,9 +313,16 @@
                 "dente_ausente": "Dente Ausente",
                 "implante": "Implante",
                 "coroa": "Coroa",
+                "terceiro_molar_sup": "Terceiro Molar Superior",
+                "terceiro_molar_inf": "Terceiro Molar Inferior",
+                "pre_molar_sup": "Pré-Molar Superior",
+                "pre_molar_inf": "Pré-Molar Inferior",
+                "molar_sup": "Molar Superior",
+                "molar_inf": "Molar Inferior",
+                "filling": "Restauração" // Mapeamento explícito para "Filling"
             };
 
-            const getFriendlyLabel = (label) => labelMap[label] || label.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            const getFriendlyLabel = (label) => labelMap[label.toLowerCase()] || label.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
 
             // --- Lógica de Login ---
             const handleLogin = () => {
@@ -373,14 +380,12 @@
             const handleFileUpload = (e) => {
                 const file = e.target.files[0];
                 if (file) {
-                    // --- CORREÇÃO: Reset completo do estado da análise ---
                     currentImageFile = file;
                     analysisResults = [];
                     chatHistory = [];
                     activeFinding = null;
                     hoveredFinding = null;
                     
-                    // Limpa a interface do chat de análise
                     const chatContainer = analysisChatContainerEl.querySelector('.chat-container');
                     if (chatContainer) chatContainer.innerHTML = '';
                     
@@ -460,20 +465,38 @@
                 ctx.clearRect(0, 0, canvas.width, canvas.height); 
             }
 
+            // --- CORREÇÃO: Lógica de redesenho com Spotlight ---
             function redrawAllAnnotations() {
                 clearCanvas();
+
+                // Efeito Spotlight para o 'hoveredFinding'
+                if (hoveredFinding) {
+                    ctx.save();
+                    // 1. Preenche o canvas com uma camada escura
+                    ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    
+                    // 2. "Corta" a área da máscara do achado em hover
+                    ctx.globalCompositeOperation = 'destination-out';
+                    drawMask(hoveredFinding, "white", "transparent");
+                    
+                    // 3. Restaura o modo de desenho para desenhar por cima
+                    ctx.restore();
+
+                    // 4. Desenha a máscara do hover novamente, mas colorida, para dar o destaque
+                    drawMask(hoveredFinding, "rgba(56, 189, 248, 0.4)", '#38bdf8', 3);
+                }
+                
+                // Desenha o 'activeFinding' (clicado/zoom) por cima de tudo, se existir
                 if (activeFinding) {
                     drawMask(activeFinding, "rgba(251, 146, 60, 0.4)", '#fb923c', 3);
                 }
-                if (hoveredFinding && hoveredFinding.id !== activeFinding?.id) {
-                    drawMask(hoveredFinding, "rgba(56, 189, 248, 0.4)", '#38bdf8', 3);
-                }
             }
 
-            // --- Lógica de Zoom ---
+            // --- CORREÇÃO: Lógica de Zoom ---
             function zoomToFinding(finding) {
                 activeFinding = finding;
-                const { width, height } = imageZoomContainer.getBoundingClientRect();
+                const { clientWidth, clientHeight } = radiographImg; // Usar dimensões da imagem real
                 const { segmentation } = finding;
                 
                 const xCoords = segmentation.map(p => p[0]);
@@ -487,8 +510,8 @@
                 const centerY = (minY + maxY) / 2;
 
                 const zoomLevel = 2;
-                const newX = -(centerX * width * zoomLevel - width / 2);
-                const newY = -(centerY * height * zoomLevel - height / 2);
+                const newX = -(centerX * clientWidth * zoomLevel - clientWidth / 2);
+                const newY = -(centerY * clientHeight * zoomLevel - clientHeight / 2);
 
                 imageZoomContainer.style.transform = `scale(${zoomLevel}) translate(${newX / zoomLevel}px, ${newY / zoomLevel}px)`;
                 resetZoomBtn.classList.remove('hidden');
@@ -521,7 +544,8 @@
                 const mousePoint = { x: e.clientX - rect.left, y: e.clientY - rect.top };
                 
                 let foundFinding = null;
-                for (const finding of analysisResults) {
+                // Itera em ordem reversa para que os achados menores (desenhados por último) sejam detectados primeiro
+                for (const finding of [...analysisResults].reverse()) {
                     const polygon = finding.segmentation.map(p => [(p[0]/100) * canvas.width, (p[1]/100) * canvas.height]);
                     if (isPointInPolygon(mousePoint, polygon)) {
                         foundFinding = finding;

@@ -11,12 +11,14 @@ from ultralytics import YOLO
 # A dependência 'scipy' foi removida pois não é mais necessária
 import httpx
 
+
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List
+
 
 # -----------------------------------------------------------------------------
 # 1. DEFINIÇÃO DOS MODELOS DE DADOS (PYDANTIC)
@@ -27,23 +29,34 @@ class Finding(BaseModel):
     confidence: float
     segmentation: List[List[float]]
 
+
 class AnalysisResponse(BaseModel):
     findings: List[Finding]
 
+
 class ChatPart(BaseModel):
     text: str
+
 
 class ChatContent(BaseModel):
     role: str
     parts: List[ChatPart]
 
+
 class ChatHistory(BaseModel):
     history: List[ChatContent]
+
+
+# Modelo para verificação de senha
+class PasswordRequest(BaseModel):
+    password: str
+
 
 # -----------------------------------------------------------------------------
 # 2. CONFIGURAÇÃO INICIAL E CICLO DE VIDA DA APLICAÇÃO
 # -----------------------------------------------------------------------------
 lifespan_storage = {}
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -52,6 +65,11 @@ async def lifespan(app: FastAPI):
     if not lifespan_storage['gemini_api_key']:
         print("❌ AVISO: A variável de ambiente 'GEMINI_API_KEY' não foi encontrada.")
         print("➡️ Adicione-a nos 'Secrets' das configurações do seu Space no Hugging Face.")
+
+    # Configurar senha da aplicação
+    lifespan_storage['app_password'] = os.getenv('APP_PASSWORD', 'radiologia2024')
+    print(f"✅ Senha da aplicação configurada.")
+
     try:
         lifespan_storage['yolo_model'] = YOLO('models/best.pt')
         print("✅ Modelo de Segmentação YOLO (best.pt) carregado com sucesso.")
@@ -65,6 +83,7 @@ async def lifespan(app: FastAPI):
     await lifespan_storage['http_client'].aclose()
     print("✅ Cliente HTTP assíncrono fechado.")
 
+
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
@@ -73,6 +92,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # --- DICIONÁRIO DE TRADUÇÕES EXPANDIDO ---
 # Mapeia os nomes técnicos do modelo para nomes completos em português.
@@ -85,6 +105,7 @@ LABEL_MAP = {
     "restauracao": "Restauração",
     "implante": "Implante",
     "dente_incluso": "Dente Incluso",
+
 
     # Mapeamentos adicionados com base na sua imagem e possíveis variações
     "pre_molar_inf": "Pré-Molar Inferior",
@@ -102,10 +123,13 @@ LABEL_MAP = {
 }
 
 
+
+
 # -----------------------------------------------------------------------------
 # 3. FUNÇÕES AUXILIARES
 # -----------------------------------------------------------------------------
 # A função 'smooth_segmentation' foi removida.
+
 
 async def run_model_prediction(model, image):
     loop = asyncio.get_event_loop()
@@ -113,9 +137,34 @@ async def run_model_prediction(model, image):
     results = await loop.run_in_executor(None, predict_with_args)
     return results
 
+
 # -----------------------------------------------------------------------------
 # 4. ENDPOINTS DA API
 # -----------------------------------------------------------------------------
+
+@app.post("/verify-password")
+async def verify_password(payload: PasswordRequest):
+    """Endpoint para verificar a senha de acesso ao protótipo"""
+    print("\n🔐 Rota /verify-password acessada!")
+    try:
+        correct_password = lifespan_storage.get('app_password')
+        user_password = payload.password.strip()
+
+        print(f"🔍 Verificando senha... (tamanho: {len(user_password)} caracteres)")
+
+        if user_password == correct_password:
+            print("✅ Senha correta! Acesso liberado.")
+            return {"success": True}
+        else:
+            print("❌ Senha incorreta.")
+            return {"success": False}
+
+    except Exception as e:
+        print(f"❌ Erro na verificação de senha: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Erro interno do servidor na verificação de senha")
+
+
 @app.post("/analyze", response_model=AnalysisResponse)
 async def analyze_image(file: UploadFile = File(...)):
     print("\n📡 Rota /analyze acessada!")
@@ -125,27 +174,29 @@ async def analyze_image(file: UploadFile = File(...)):
     try:
         contents = await file.read()
         image = Image.open(io.BytesIO(contents)).convert("RGB")
-        
+
         results_generator = await run_model_prediction(model, image)
         results = list(results_generator)
-        
+
         all_findings = []
         if not results:
             print("⚠️ Nenhum resultado retornado pelo modelo.")
             return {"findings": []}
 
+
         prediction = results[0]
         class_names = prediction.names
+
 
         if prediction.masks:
             for i, box in enumerate(prediction.boxes):
                 if i < len(prediction.masks.xyn):
                     technical_label = class_names.get(int(box.cls[0].item()), "Desconhecido")
                     friendly_label = LABEL_MAP.get(technical_label, technical_label.replace("_", " ").title())
-                    
+
                     # Usa diretamente os pontos originais da máscara fornecidos pelo modelo
                     mask_points = prediction.masks.xyn[i]
-                    
+
                     all_findings.append({
                         "id": f"finding_{i}",
                         "label": friendly_label,
@@ -159,6 +210,7 @@ async def analyze_image(file: UploadFile = File(...)):
         print(f"❌ Erro Crítico na análise: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="Erro interno do servidor ao analisar imagem")
+
 
 @app.post("/chat")
 async def handle_chat(payload: ChatHistory):
@@ -183,14 +235,17 @@ async def handle_chat(payload: ChatHistory):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="Erro interno do servidor no processamento do chat")
 
+
 # -----------------------------------------------------------------------------
 # 5. SERVINDO ARQUIVOS ESTÁTICOS (FRONT-END)
 # -----------------------------------------------------------------------------
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+
 @app.get("/")
 async def serve_index():
     return FileResponse('static/index.html')
+
 
 @app.get("/{path:path}")
 async def serve_static_files(path: str):

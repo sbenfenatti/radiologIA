@@ -1,8 +1,8 @@
 ---
-title: RadiologIA
+title: RadiologIA Playground
 emoji: 🔥
 colorFrom: green
-colorTo: pink
+colorTo: red
 sdk: docker
 pinned: false
 short_description: test

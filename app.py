@@ -1,248 +1,200 @@
-import io
+# app.py - Versão com FastAPI (Suavização Removida)
 import os
-import base64
-from typing import Optional, Tuple
-
+import io
+import asyncio
+import functools 
+import traceback 
+from contextlib import asynccontextmanager
 import numpy as np
 from PIL import Image
-import cv2
-
-import torch
-import torch.nn as nn
-import torchvision.transforms as T
+from ultralytics import YOLO
+# A dependência 'scipy' foi removida pois não é mais necessária
+import httpx
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+from typing import List
 
-# =========================
-# Configurações principais
-# =========================
-STATIC_DIR = "static"
-# Usa exatamente o caminho e nome do seu arquivo .pth dentro de model/
-MODEL_WEIGHTS = "model/v1_u_net__model_1024x512_b3.pth"
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+# -----------------------------------------------------------------------------
+# 1. DEFINIÇÃO DOS MODELOS DE DADOS (PYDANTIC)
+# -----------------------------------------------------------------------------
+class Finding(BaseModel):
+    id: str
+    label: str
+    confidence: float
+    segmentation: List[List[float]]
 
-# Conforme classes.csv (0..23)
-NUM_CLASSES = 24
+class AnalysisResponse(BaseModel):
+    findings: List[Finding]
 
-# Transparência da sobreposição
-ALPHA = float(os.getenv("MASK_ALPHA", "0.4"))
+class ChatPart(BaseModel):
+    text: str
 
-# Paleta simples (classe 0 fundo preto; demais geradas/repetidas)
-# Pode ser substituída por uma paleta clínica estável.
-BASE_PALETTE = [
-    (0, 0, 0),
-    (0, 255, 0),
-    (255, 0, 0),
-    (0, 0, 255),
-    (255, 255, 0),
-    (255, 0, 255),
-    (0, 255, 255),
-    (128, 0, 0),
-    (0, 128, 0),
-    (0, 0, 128),
-    (128, 128, 0),
-    (128, 0, 128),
-    (0, 128, 128),
-    (64, 64, 64),
-    (192, 64, 0),
-    (0, 192, 64),
-    (64, 0, 192),
-    (192, 0, 64),
-    (64, 192, 0),
-    (0, 64, 192),
-    (192, 192, 0),
-    (192, 0, 192),
-    (0, 192, 192),
-    (128, 128, 128),
-]
-def get_palette(n):
-    if n <= len(BASE_PALETTE):
-        return BASE_PALETTE[:n]
-    pal = list(BASE_PALETTE)
-    rng = np.random.default_rng(123)
-    while len(pal) < n:
-        pal.append(tuple(int(c) for c in rng.integers(0, 255, size=3)))
-    return pal
+class ChatContent(BaseModel):
+    role: str
+    parts: List[ChatPart]
 
-PALETTE = get_palette(NUM_CLASSES)
+class ChatHistory(BaseModel):
+    history: List[ChatContent]
 
-# =========================
-# U‑Net simples (troque se tiver sua classe real)
-# =========================
-class DoubleConv(nn.Module):
-    def __init__(self, in_c, out_c):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Conv2d(in_c, out_c, 3, padding=1, bias=False),
-            nn.BatchNorm2d(out_c),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(out_c, out_c, 3, padding=1, bias=False),
-            nn.BatchNorm2d(out_c),
-            nn.ReLU(inplace=True),
-        )
-    def forward(self, x):
-        return self.net(x)
+# -----------------------------------------------------------------------------
+# 2. CONFIGURAÇÃO INICIAL E CICLO DE VIDA DA APLICAÇÃO
+# -----------------------------------------------------------------------------
+lifespan_storage = {}
 
-class UNet(nn.Module):
-    def __init__(self, in_channels=3, num_classes=24, features=(64, 128, 256, 512)):
-        super().__init__()
-        self.downs = nn.ModuleList()
-        self.ups = nn.ModuleList()
-        ch = in_channels
-        for f in features:
-            self.downs.append(DoubleConv(ch, f))
-            ch = f
-        self.pool = nn.MaxPool2d(2, 2)
-        self.bottleneck = DoubleConv(features[-1], features[-1] * 2)
-        rev = list(reversed(features))
-        ch = features[-1] * 2
-        for f in rev:
-            self.ups.append(nn.ConvTranspose2d(ch, f, kernel_size=2, stride=2))
-            self.ups.append(DoubleConv(ch, f))
-            ch = f
-        self.head = nn.Conv2d(features[0], num_classes, kernel_size=1)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("🚀 Iniciando a aplicação...")
+    lifespan_storage['gemini_api_key'] = os.getenv('GEMINI_API_KEY')
+    if not lifespan_storage['gemini_api_key']:
+        print("❌ AVISO: A variável de ambiente 'GEMINI_API_KEY' não foi encontrada.")
+        print("➡️ Adicione-a nos 'Secrets' das configurações do seu Space no Hugging Face.")
+    try:
+        lifespan_storage['yolo_model'] = YOLO('models/best.pt')
+        print("✅ Modelo de Segmentação YOLO (best.pt) carregado com sucesso.")
+    except Exception as e:
+        print(f"❌ Erro fatal ao carregar o modelo YOLO: {e}")
+        lifespan_storage['yolo_model'] = None
+    lifespan_storage['http_client'] = httpx.AsyncClient()
+    print("✅ Cliente HTTP assíncrono criado.")
+    yield
+    print("👋 Encerrando a aplicação...")
+    await lifespan_storage['http_client'].aclose()
+    print("✅ Cliente HTTP assíncrono fechado.")
 
-    def forward(self, x):
-        skips = []
-        for down in self.downs:
-            x = down(x)
-            skips.append(x)
-            x = self.pool(x)
-        x = self.bottleneck(x)
-        skips = skips[::-1]
-        for i in range(0, len(self.ups), 2):
-            x = self.ups[i](x)
-            s = skips[i // 2]
-            if x.shape[-2:] != s.shape[-2:]:
-                x = T.functional.resize(x, s.shape[-2:], antialias=True)
-            x = torch.cat([s, x], dim=1)
-            x = self.ups[i + 1](x)
-        return self.head(x)
+app = FastAPI(lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# =========================
-# Carregar modelo
-# =========================
-def load_model(weights_path: str, num_classes: int) -> nn.Module:
-    if not os.path.exists(weights_path):
-        raise FileNotFoundError(f"Modelo não encontrado em {weights_path}")
-    model = UNet(in_channels=3, num_classes=num_classes)
-    state = torch.load(weights_path, map_location="cpu")
-    if isinstance(state, dict) and "state_dict" in state:
-        state = state["state_dict"]
-    new_state = {}
-    for k, v in state.items():
-        nk = k[7:] if k.startswith("module.") else k
-        new_state[nk] = v
-    # strict=False para tolerar pequenas diferenças de chaves
-    model.load_state_dict(new_state, strict=False)  # PyTorch permite isso em casos práticos[20][9][12]
-    model.to(DEVICE).eval()
-    return model
+# --- DICIONÁRIO DE TRADUÇÕES EXPANDIDO ---
+# Mapeia os nomes técnicos do modelo para nomes completos em português.
+LABEL_MAP = {
+    # Mapeamentos originais
+    "lesao_periapical": "Lesão Periapical",
+    "carie": "Cárie",
+    "fratura_radicular": "Fratura Radicular",
+    "calculo_dental": "Cálculo Dental",
+    "restauracao": "Restauração",
+    "implante": "Implante",
+    "dente_incluso": "Dente Incluso",
 
-# =========================
-# Pré/pós-processamento
-# =========================
-# Ajuste mean/std e resize para refletir seu treino do notebook.
-IM_MEAN = [0.485, 0.456, 0.406]
-IM_STD = [0.229, 0.224, 0.225]
+    # Mapeamentos adicionados com base na sua imagem e possíveis variações
+    "pre_molar_inf": "Pré-Molar Inferior",
+    "jaw": "Mandíbula",
+    "incisivo_lateral_inf": "Incisivo Lateral Inferior",
+    "incisivo_central_sup": "Incisivo Central Superior",
+    "molar_inf": "Molar Inferior",
+    "maxila": "Maxila",
+    "incisivo_lateral_sup": "Incisivo Lateral Superior",
+    "incisivo_central_inf": "Incisivo Central Inferior",
+    "molar_sup": "Molar Superior",
+    "pre_molar_sup": "Pré-Molar Superior",
+    "canino_inf": "Canino Inferior",
+    "canino_sup": "Canino Superior",
+}
 
-# Opcional: se treinou com tamanho fixo (ex.: 1024x512), defina aqui:
-TARGET_SIZE = (512, 1024)  # (H, W) — ajuste conforme seu notebook
 
-def preprocess(pil_img: Image.Image) -> Tuple[torch.Tensor, Tuple[int, int], Tuple[int, int]]:
-    pil_img = pil_img.convert("RGB")
-    w, h = pil_img.size
-    orig_hw = (h, w)
-    if TARGET_SIZE is not None:
-        pil_img_res = pil_img.resize((TARGET_SIZE[1], TARGET_SIZE[0]), Image.BILINEAR)
-    else:
-        pil_img_res = pil_img
-    res_hw = (pil_img_res.size[1], pil_img_res.size[0])
-    img = T.ToTensor()(pil_img_res)
-    img = T.Normalize(IM_MEAN, IM_STD)(img)
-    img = img.unsqueeze(0).to(DEVICE)
-    return img, orig_hw, res_hw
+# -----------------------------------------------------------------------------
+# 3. FUNÇÕES AUXILIARES
+# -----------------------------------------------------------------------------
+# A função 'smooth_segmentation' foi removida.
 
-def postprocess_mask(logits: torch.Tensor, orig_hw: Tuple[int, int], res_hw: Tuple[int, int]) -> np.ndarray:
-    with torch.no_grad():
-        probs = torch.softmax(logits, dim=1)[0]  # [C,h,w]
-        mask = torch.argmax(probs, dim=0).float()  # [h,w]
-        mask_np = mask.cpu().numpy()
-        # Primeiro volta para tamanho original da imagem
-        mask_np = cv2.resize(mask_np, (orig_hw[1], orig_hw[0]), interpolation=cv2.INTER_NEAREST)
-        return mask_np
+async def run_model_prediction(model, image):
+    loop = asyncio.get_event_loop()
+    predict_with_args = functools.partial(model.predict, source=image, conf=0.5)
+    results = await loop.run_in_executor(None, predict_with_args)
+    return results
 
-def colorize_mask(mask: np.ndarray) -> np.ndarray:
-    h, w = mask.shape
-    color = np.zeros((h, w, 3), dtype=np.uint8)
-    ids = mask.astype(np.uint8)
-    for cls_id in np.unique(ids):
-        if cls_id < len(PALETTE):
-            color[ids == cls_id] = PALETTE[cls_id]
-        else:
-            # fallback
-            rng = np.random.default_rng(int(cls_id))
-            color[ids == cls_id] = tuple(int(c) for c in rng.integers(0, 255, size=3))
-    return color  # BGR-like tuple order used consistently abaixo
+# -----------------------------------------------------------------------------
+# 4. ENDPOINTS DA API
+# -----------------------------------------------------------------------------
+@app.post("/analyze", response_model=AnalysisResponse)
+async def analyze_image(file: UploadFile = File(...)):
+    print("\n📡 Rota /analyze acessada!")
+    model = lifespan_storage.get('yolo_model')
+    if not model:
+        raise HTTPException(status_code=500, detail="Modelo YOLO não está carregado.")
+    try:
+        contents = await file.read()
+        image = Image.open(io.BytesIO(contents)).convert("RGB")
+        
+        results_generator = await run_model_prediction(model, image)
+        results = list(results_generator)
+        
+        all_findings = []
+        if not results:
+            print("⚠️ Nenhum resultado retornado pelo modelo.")
+            return {"findings": []}
 
-def overlay_mask_on_image(pil_img: Image.Image, color_mask_bgr: np.ndarray, alpha: float = ALPHA) -> np.ndarray:
-    img_bgr = cv2.cvtColor(np.array(pil_img.convert("RGB")), cv2.COLOR_RGB2BGR)
-    # Transparência com addWeighted (alpha + beta = 1)[10][13][21]
-    overlay = cv2.addWeighted(img_bgr, 1.0, color_mask_bgr, alpha, 0)
-    return overlay
+        prediction = results[0]
+        class_names = prediction.names
 
-# =========================
-# FastAPI
-# =========================
-app = FastAPI(title="radiologIA U‑Net API", version="1.0")
+        if prediction.masks:
+            for i, box in enumerate(prediction.boxes):
+                if i < len(prediction.masks.xyn):
+                    technical_label = class_names.get(int(box.cls[0].item()), "Desconhecido")
+                    friendly_label = LABEL_MAP.get(technical_label, technical_label.replace("_", " ").title())
+                    
+                    # Usa diretamente os pontos originais da máscara fornecidos pelo modelo
+                    mask_points = prediction.masks.xyn[i]
+                    
+                    all_findings.append({
+                        "id": f"finding_{i}",
+                        "label": friendly_label,
+                        "confidence": box.conf[0].item(),
+                        # Envia os pontos originais, sem suavização
+                        "segmentation": (mask_points * 100).tolist()
+                    })
+        print(f"✅ Análise de imagem concluída. Enviando {len(all_findings)} achados.")
+        return {"findings": all_findings}
+    except Exception as e:
+        print(f"❌ Erro Crítico na análise: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Erro interno do servidor ao analisar imagem")
 
-if os.path.isdir(STATIC_DIR):
-    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+@app.post("/chat")
+async def handle_chat(payload: ChatHistory):
+    print("\n📡 Rota /chat acessada!")
+    api_key = lifespan_storage.get('gemini_api_key')
+    client = lifespan_storage.get('http_client')
+    if not api_key:
+        raise HTTPException(status_code=500, detail="A chave da API do Gemini não está configurada no servidor.")
+    gemini_api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+    headers = {'Content-Type': 'application/json'}
+    request_body = {"contents": [item.dict() for item in payload.history]}
+    try:
+        response = await client.post(gemini_api_url, headers=headers, json=request_body, timeout=60.0)
+        response.raise_for_status()
+        print("✅ Resposta da API Gemini recebida com sucesso.")
+        return response.json()
+    except httpx.RequestError as e:
+        print(f"❌ Erro ao chamar a API do Gemini: {e}")
+        raise HTTPException(status_code=503, detail=f"Erro de comunicação com a API do Gemini: {e}")
+    except Exception as e:
+        print(f"❌ Erro Crítico no chat: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Erro interno do servidor no processamento do chat")
 
-MODEL: Optional[nn.Module] = None
-
-@app.on_event("startup")
-def on_startup():
-    global MODEL
-    MODEL = load_model(MODEL_WEIGHTS, NUM_CLASSES)
+# -----------------------------------------------------------------------------
+# 5. SERVINDO ARQUIVOS ESTÁTICOS (FRONT-END)
+# -----------------------------------------------------------------------------
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/")
-def root():
-    index_path = os.path.join(STATIC_DIR, "index.html")
-    if os.path.exists(index_path):
-        return FileResponse(index_path, media_type="text/html")
-    return JSONResponse({"status": "ok", "message": "radiologIA U‑Net API up"})
+async def serve_index():
+    return FileResponse('static/index.html')
 
-@app.post("/predict")
-async def predict(file: UploadFile = File(...)):
-    if MODEL is None:
-        raise HTTPException(status_code=500, detail="Modelo não carregado")
-    try:
-        content = await file.read()
-        pil = Image.open(io.BytesIO(content)).convert("RGB")
-    except Exception:
-        raise HTTPException(status_code=400, detail="Não foi possível ler a imagem")
-
-    tensor, orig_hw, res_hw = preprocess(pil)
-
-    with torch.no_grad():
-        logits = MODEL(tensor)  # [1,C,h,w]
-
-    mask = postprocess_mask(logits, orig_hw, res_hw)  # [H,W] ids 0..C-1
-
-    color_mask = colorize_mask(mask)  # BGR
-    overlay = overlay_mask_on_image(pil, color_mask, alpha=ALPHA)  # BGR
-
-    ok1, mask_png = cv2.imencode(".png", color_mask)
-    ok2, overlay_png = cv2.imencode(".png", overlay)
-    if not ok1 or not ok2:
-        raise HTTPException(status_code=500, detail="Falha ao codificar PNGs")
-
-    return {
-        "width": orig_hw[1],
-        "height": orig_hw[0],
-        "num_classes": NUM_CLASSES,
-        "mask_png_base64": base64.b64encode(mask_png.tobytes()).decode("utf-8"),  # retorno JSON com base64[4][14]
-        "overlay_png_base64": base64.b64encode(overlay_png.tobytes()).decode("utf-8"),
-    }
+@app.get("/{path:path}")
+async def serve_static_files(path: str):
+    file_path = os.path.join('static', path)
+    if os.path.exists(file_path):
+        return FileResponse(file_path)
+    return FileResponse('static/index.html')

@@ -1,8 +1,9 @@
 # Define a imagem base do Python que vamos usar
 FROM python:3.10
 
-# Instala a dependência do sistema (libGL) para o OpenCV
-RUN apt-get update && apt-get install -y libgl1-mesa-glx
+# Instala a dependência do sistema (libgl1) para o OpenCV
+# MUDANÇA: 'libgl1-mesa-glx' foi substituído por 'libgl1'
+RUN apt-get update && apt-get install -y libgl1
 
 # Cria e define o diretório de trabalho
 WORKDIR /app

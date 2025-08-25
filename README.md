@@ -1,6 +1,6 @@
 ---
-title: RadiologIA Playground
-emoji: 🔥
+title: RadiologIA 
+emoji: 🧠
 colorFrom: green
 colorTo: red
 sdk: docker

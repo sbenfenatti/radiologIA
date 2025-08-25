@@ -34,9 +34,14 @@
         .chat-container::-webkit-scrollbar { width: 6px; }
         .chat-container::-webkit-scrollbar-track { background: transparent; }
         .chat-container::-webkit-scrollbar-thumb { background-color: rgba(0, 0, 0, 0.2); border-radius: 20px; }
-        #image-container { position: relative; width: 100%; height: 100%; overflow: hidden; display: flex; justify-content: center; align-items: center; }
+        #image-container { position: relative; width: 100%; height: 100%; overflow: hidden; display: flex; justify-content: center; align-items: center; cursor: crosshair; }
         #radiograph-img { max-width: 100%; max-height: 100%; object-fit: contain; }
-        #overlay-canvas { position: absolute; pointer-events: none; }
+        
+        #overlay-canvas, #spotlight-canvas { 
+            position: absolute; 
+            pointer-events: none;
+        }
+
         .loader { border-top-color: #38bdf8; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         
@@ -55,7 +60,7 @@
             -webkit-backdrop-filter: blur(5px);
             transition: all 0.2s ease;
             box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
-            color: #334155; /* slate-700 */
+            color: #334155;
             font-weight: 500;
         }
         .glass-button:hover {
@@ -124,11 +129,11 @@
             </div>
             <div class="flex items-center space-x-4">
                  <label for="image-upload-analysis" class="glass-button cursor-pointer py-2 px-5 rounded-xl">
-                     Carregar Nova
-                 </label>
+                    Carregar Nova
+                </label>
                 <input type="file" id="image-upload-analysis" class="hidden" accept="image/*">
                 <button id="analyze-btn" class="glass-button py-2 px-5 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed" disabled>
-                     Analisar Imagem
+                    Analisar Imagem
                 </button>
             </div>
         </header>
@@ -138,11 +143,12 @@
                 <div id="image-container" class="hidden">
                     <img id="radiograph-img" alt="Radiografia a ser analisada" class="rounded-md shadow-lg">
                     <canvas id="overlay-canvas"></canvas>
+                    <canvas id="spotlight-canvas"></canvas>
                 </div>
                  <div id="viewer-placeholder" class="text-center text-slate-500 flex flex-col justify-center items-center">
-                     <svg xmlns="http://www.w3.org/2000/svg" class="mx-auto h-16 w-16 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.158 0L10.5 9.75M10.5 12a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" /></svg>
-                     <p class="mt-4 text-lg">Carregue uma radiografia para começar.</p>
-                 </div>
+                    <svg xmlns="http://www.w3.org/2000/svg" class="mx-auto h-16 w-16 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.158 0L10.5 9.75M10.5 12a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" /></svg>
+                    <p class="mt-4 text-lg">Carregue uma radiografia para começar.</p>
+                </div>
                 <div id="loader" class="hidden absolute inset-0 glass-effect flex-col items-center justify-center z-20">
                     <div class="loader ease-linear rounded-full border-8 border-t-8 border-gray-400 h-24 w-24 mb-4"></div>
                     <p class="text-xl font-semibold">Analisando com IA...</p>
@@ -175,101 +181,42 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            // --- INÍCIO: Lógica do Fundo com Canvas ---
+            // --- Lógica do Fundo com Canvas ---
             const bgCanvas = document.getElementById('background-canvas');
             const bgCtx = bgCanvas.getContext('2d');
             let shapes = [];
-
-            function resizeCanvas() {
-                bgCanvas.width = window.innerWidth;
-                bgCanvas.height = window.innerHeight;
-            }
+            function resizeCanvas() { bgCanvas.width = window.innerWidth; bgCanvas.height = window.innerHeight; }
             window.addEventListener('resize', resizeCanvas);
             resizeCanvas();
-
             const shapeTypes = ['circle', 'square', 'triangle'];
-            const colors = [
-                'rgba(179, 209, 255, 0.5)', // Azul pastel
-                'rgba(194, 230, 208, 0.5)', // Verde pastel
-                'rgba(255, 249, 196, 0.5)'  // Amarelo pastel
-            ];
+            const colors = ['rgba(179, 209, 255, 0.5)', 'rgba(194, 230, 208, 0.5)', 'rgba(255, 249, 196, 0.5)'];
             const shapeCount = 12;
-
             class Shape {
-                constructor() {
-                    this.type = shapeTypes[Math.floor(Math.random() * shapeTypes.length)];
-                    this.size = Math.random() * 80 + 60;
-                    this.x = Math.random() * bgCanvas.width;
-                    this.y = Math.random() * bgCanvas.height;
-                    this.vx = (Math.random() - 0.5) * 0.5;
-                    this.vy = (Math.random() - 0.5) * 0.5;
-                    this.color = colors[Math.floor(Math.random() * colors.length)];
-                }
-
-                draw() {
-                    bgCtx.fillStyle = this.color;
-                    bgCtx.beginPath();
-                    if (this.type === 'circle') {
-                        bgCtx.arc(this.x, this.y, this.size / 2, 0, Math.PI * 2);
-                    } else if (this.type === 'square') {
-                        bgCtx.rect(this.x - this.size / 2, this.y - this.size / 2, this.size, this.size);
-                    } else if (this.type === 'triangle') {
-                        bgCtx.moveTo(this.x, this.y - this.size / 2);
-                        bgCtx.lineTo(this.x - this.size / 2, this.y + this.size / 2);
-                        bgCtx.lineTo(this.x + this.size / 2, this.y + this.size / 2);
-                        bgCtx.closePath();
-                    }
-                    bgCtx.fill();
-                }
-
-                update() {
-                    if (this.x < 0 || this.x > bgCanvas.width) this.vx *= -1;
-                    if (this.y < 0 || this.y > bgCanvas.height) this.vy *= -1;
-                    this.x += this.vx;
-                    this.y += this.vy;
-                }
+                constructor() { this.type = shapeTypes[Math.floor(Math.random() * shapeTypes.length)]; this.size = Math.random() * 80 + 60; this.x = Math.random() * bgCanvas.width; this.y = Math.random() * bgCanvas.height; this.vx = (Math.random() - 0.5) * 0.5; this.vy = (Math.random() - 0.5) * 0.5; this.color = colors[Math.floor(Math.random() * colors.length)]; }
+                draw() { bgCtx.fillStyle = this.color; bgCtx.beginPath(); if (this.type === 'circle') { bgCtx.arc(this.x, this.y, this.size / 2, 0, Math.PI * 2); } else if (this.type === 'square') { bgCtx.rect(this.x - this.size / 2, this.y - this.size / 2, this.size, this.size); } else if (this.type === 'triangle') { bgCtx.moveTo(this.x, this.y - this.size / 2); bgCtx.lineTo(this.x - this.size / 2, this.y + this.size / 2); bgCtx.lineTo(this.x + this.size / 2, this.y + this.size / 2); bgCtx.closePath(); } bgCtx.fill(); }
+                update() { if (this.x < 0 || this.x > bgCanvas.width) this.vx *= -1; if (this.y < 0 || this.y > bgCanvas.height) this.vy *= -1; this.x += this.vx; this.y += this.vy; }
             }
-
-            function initShapes() {
-                shapes = [];
-                for (let i = 0; i < shapeCount; i++) {
-                    shapes.push(new Shape());
-                }
-            }
-
-            function animateBackground() {
-                bgCtx.clearRect(0, 0, bgCanvas.width, bgCanvas.height);
-                shapes.forEach(shape => {
-                    shape.update();
-                    shape.draw();
-                });
-                requestAnimationFrame(animateBackground);
-            }
-
+            function initShapes() { shapes = []; for (let i = 0; i < shapeCount; i++) { shapes.push(new Shape()); } }
+            function animateBackground() { bgCtx.clearRect(0, 0, bgCanvas.width, bgCanvas.height); shapes.forEach(shape => { shape.update(); shape.draw(); }); requestAnimationFrame(animateBackground); }
             initShapes();
             animateBackground();
-            // --- FIM: Lógica do Fundo com Canvas ---
 
-            // A linha 'const DEMO_PASSWORD' foi removida daqui. A senha não existe mais no frontend.
-
+            // --- Variáveis Globais e Constantes ---
+            const DEMO_PASSWORD = 'rad2025'; 
             const loginPage = document.getElementById('login-page');
             const welcomePage = document.getElementById('welcome-page');
             const analysisPage = document.getElementById('analysis-page');
-            
             const passwordInput = document.getElementById('password-input');
             const loginButton = document.getElementById('login-button');
             const errorMessage = document.getElementById('error-message');
-
             const welcomeChatContainerEl = document.getElementById('welcome-chat-container');
             const analysisChatContainerEl = document.getElementById('analysis-chat-container');
             const chatTemplate = document.getElementById('chat-template');
             welcomeChatContainerEl.innerHTML = chatTemplate.innerHTML;
             analysisChatContainerEl.innerHTML = chatTemplate.innerHTML;
-            
             const chatContainers = document.querySelectorAll('.chat-container');
             const chatInputs = document.querySelectorAll('.chat-input');
             const chatSends = document.querySelectorAll('.chat-send');
-
             const imageUploadWelcome = document.getElementById('image-upload-welcome');
             const imageUploadAnalysis = document.getElementById('image-upload-analysis');
             const radiographImg = document.getElementById('radiograph-img');
@@ -277,90 +224,61 @@
             const viewerPlaceholder = document.getElementById('viewer-placeholder');
             const analyzeBtn = document.getElementById('analyze-btn');
             const loader = document.getElementById('loader');
-            const canvas = document.getElementById('overlay-canvas');
-            const ctx = canvas.getContext('2d');
+            const overlayCanvas = document.getElementById('overlay-canvas');
+            const overlayCtx = overlayCanvas.getContext('2d');
+            const spotlightCanvas = document.getElementById('spotlight-canvas');
+            const spotlightCtx = spotlightCanvas.getContext('2d');
             
             let analysisResults = [];
             let currentImageFile = null;
             let chatHistory = [];
             let activeFinding = null;
+            let hoveredFinding = null;
+            let isAnalyzing = false; // <-- CORREÇÃO: Flag para prevenir análises múltiplas
 
-            // ==================================================================
-            // INÍCIO DA SEÇÃO MODIFICADA: Função de Login
-            // ==================================================================
-            const handleLogin = async () => {
-                const password = passwordInput.value;
-                if (!password) {
-                    errorMessage.textContent = 'Por favor, digite a senha.';
-                    return;
-                }
-
-                loginButton.disabled = true;
-                loginButton.textContent = 'Verificando...';
-
-                try {
-                    const response = await fetch('/verify-password', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({ password: password }),
-                    });
-
-                    if (response.ok) {
-                        loginPage.classList.add('hidden');
-                        welcomePage.classList.remove('hidden');
-                        welcomePage.classList.add('flex');
-                        initializeChat();
-                    } else {
-                        errorMessage.textContent = 'Senha incorreta.';
-                        passwordInput.classList.add('shake');
-                        setTimeout(() => {
-                            passwordInput.classList.remove('shake');
-                            errorMessage.textContent = '';
-                        }, 1000);
-                    }
-                } catch (error) {
-                    console.error('Erro ao verificar a senha:', error);
-                    errorMessage.textContent = 'Erro de conexão com o servidor.';
-                } finally {
-                    loginButton.disabled = false;
-                    loginButton.textContent = 'Entrar';
+            // --- Funções Principais ---
+            const handleLogin = () => {
+                if (passwordInput.value === DEMO_PASSWORD) {
+                    loginPage.classList.add('hidden');
+                    welcomePage.classList.remove('hidden');
+                    welcomePage.classList.add('flex');
+                    initializeChat();
+                } else {
+                    errorMessage.textContent = 'Senha incorreta.';
+                    passwordInput.classList.add('shake');
+                    setTimeout(() => {
+                        passwordInput.classList.remove('shake');
+                        errorMessage.textContent = '';
+                    }, 1000);
                 }
             };
-            // ==================================================================
-            // FIM DA SEÇÃO MODIFICADA
-            // ==================================================================
             
-            loginButton.addEventListener('click', handleLogin);
-            passwordInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') handleLogin(); });
-
             const initViewer = (imgSrc) => {
                 viewerPlaceholder.classList.add('hidden');
                 imageContainer.classList.remove('hidden');
                 radiographImg.src = imgSrc;
                 analyzeBtn.disabled = false;
                 radiographImg.onload = () => {
-                    adjustCanvasToImage();
+                    adjustAllCanvases();
                     if (activeFinding) drawFinding(activeFinding);
                 };
             };
             
-            const adjustCanvasToImage = () => {
+            const adjustAllCanvases = () => {
                 const img = radiographImg;
                 const { naturalWidth, naturalHeight, clientWidth, clientHeight } = img;
                 if (!naturalWidth || !naturalHeight) return;
                 const top = (imageContainer.clientHeight - clientHeight) / 2;
                 const left = (imageContainer.clientWidth - clientWidth) / 2;
-                canvas.style.width = `${clientWidth}px`;
-                canvas.style.height = `${clientHeight}px`;
-                canvas.style.top = `${top}px`;
-                canvas.style.left = `${left}px`;
-                canvas.width = clientWidth;
-                canvas.height = clientHeight;
+                [overlayCanvas, spotlightCanvas].forEach(canvas => {
+                    canvas.style.width = `${clientWidth}px`;
+                    canvas.style.height = `${clientHeight}px`;
+                    canvas.style.top = `${top}px`;
+                    canvas.style.left = `${left}px`;
+                    canvas.width = clientWidth;
+                    canvas.height = clientHeight;
+                });
             };
-
-            window.addEventListener('resize', adjustCanvasToImage);
 
             const handleFileUpload = (e) => {
                 const file = e.target.files[0];
@@ -372,23 +290,25 @@
                         analysisPage.classList.remove('hidden');
                         analysisPage.classList.add('flex');
                         initViewer(event.target.result);
-                        clearCanvas();
-                        analyzeBtn.click();
+                        clearAllCanvases();
+                        // Dispara a análise automaticamente após o upload
+                        runAnalysis();
                     }
                     reader.readAsDataURL(file);
                 }
             };
-            
-            imageUploadWelcome.addEventListener('change', handleFileUpload);
-            imageUploadAnalysis.addEventListener('change', handleFileUpload);
 
-            analyzeBtn.addEventListener('click', async () => {
-                if (!currentImageFile) return;
+            // CORREÇÃO: A lógica de análise foi movida para sua própria função para melhor controle.
+            async function runAnalysis() {
+                if (!currentImageFile || isAnalyzing) return; // Verifica a flag
+
+                isAnalyzing = true; // Ativa a trava
                 loader.classList.remove('hidden');
                 loader.classList.add('flex');
-                clearCanvas();
+                clearAllCanvases();
                 const formData = new FormData();
                 formData.append('file', currentImageFile);
+
                 try {
                     const response = await fetch('/analyze', { method: 'POST', body: formData });
                     if (!response.ok) {
@@ -404,8 +324,9 @@
                 } finally {
                     loader.classList.add('hidden');
                     loader.classList.remove('flex');
+                    isAnalyzing = false; // Libera a trava
                 }
-            });
+            }
 
             function displayFindingsList(findings) {
                 const findingsCount = findings.length;
@@ -416,63 +337,71 @@
                 addHtmlToAllChats(findingsHtml);
 
                 document.querySelectorAll('.finding-item').forEach(item => {
-                    item.addEventListener('click', () => {
-                        const findingId = item.dataset.findingId;
-                        activeFinding = analysisResults.find(f => f.id === findingId);
-                        if (activeFinding) drawFinding(activeFinding);
-                    });
+                    const findingId = item.dataset.findingId;
+                    const finding = analysisResults.find(f => f.id === findingId);
+                    item.addEventListener('click', () => { activeFinding = finding; if (activeFinding) drawFinding(activeFinding); });
+                    item.addEventListener('mouseenter', () => drawSpotlight(finding));
+                    item.addEventListener('mouseleave', () => drawSpotlight(null));
                 });
             }
 
             function drawFinding(findingToDraw) {
-                clearCanvas();
+                clearCanvas(overlayCanvas);
                 if (!findingToDraw || !findingToDraw.segmentation) return;
-                adjustCanvasToImage();
-                const { width, height } = canvas;
+                const { width, height } = overlayCanvas;
                 const points = findingToDraw.segmentation.map(p => [(p[0]/100) * width, (p[1]/100) * height]);
-                ctx.beginPath();
-                ctx.moveTo(points[0][0], points[0][1]);
-                for (let i = 1; i < points.length; i++) { ctx.lineTo(points[i][0], points[i][1]); }
-                ctx.closePath();
-                ctx.strokeStyle = '#fb923c';
-                ctx.lineWidth = 2;
-                ctx.fillStyle = "rgba(251, 146, 60, 0.4)";
-                ctx.stroke();
-                ctx.fill();
+                overlayCtx.beginPath();
+                overlayCtx.moveTo(points[0][0], points[0][1]);
+                for (let i = 1; i < points.length; i++) { overlayCtx.lineTo(points[i][0], points[i][1]); }
+                overlayCtx.closePath();
+                overlayCtx.strokeStyle = '#fb923c';
+                overlayCtx.lineWidth = 2;
+                overlayCtx.fillStyle = "rgba(251, 146, 60, 0.4)";
+                overlayCtx.stroke();
+                overlayCtx.fill();
             }
 
-            function clearCanvas() { ctx.clearRect(0, 0, canvas.width, canvas.height); activeFinding = null; }
-
-            function addHtmlToAllChats(html) {
-                 chatContainers.forEach(container => {
-                     container.insertAdjacentHTML('beforeend', `<div>${html}</div>`);
-                     container.scrollTop = container.scrollHeight;
-                 });
+            function drawSpotlight(finding) {
+                clearCanvas(spotlightCanvas);
+                if (!finding) return;
+                const { width, height } = spotlightCanvas;
+                const points = finding.segmentation.map(p => [(p[0]/100) * width, (p[1]/100) * height]);
+                spotlightCtx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+                spotlightCtx.fillRect(0, 0, width, height);
+                spotlightCtx.globalCompositeOperation = 'destination-out';
+                spotlightCtx.beginPath();
+                spotlightCtx.moveTo(points[0][0], points[0][1]);
+                for (let i = 1; i < points.length; i++) { spotlightCtx.lineTo(points[i][0], points[i][1]); }
+                spotlightCtx.closePath();
+                spotlightCtx.fillStyle = 'white';
+                spotlightCtx.fill();
+                spotlightCtx.globalCompositeOperation = 'source-over';
             }
 
-            function addBotMessage(message, thinking=false) {
-                let msgHtml;
-                if(thinking) {
-                    msgHtml = `<div class="flex justify-start"><div class="glass-effect rounded-lg p-3 max-w-sm"><div class="thinking-bubble"><span class="bounce1"></span><span class="bounce2"></span><span class="bounce3"></span></div></div></div>`;
-                } else {
-                     msgHtml = `<div class="flex justify-start"><div class="glass-effect rounded-lg p-3 max-w-sm"><p class="text-slate-800">${message}</p></div></div>`;
+            function isPointInPolygon(point, polygon) {
+                const { x, y } = point;
+                let isInside = false;
+                for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+                    const xi = polygon[i][0], yi = polygon[i][1];
+                    const xj = polygon[j][0], yj = polygon[j][1];
+                    const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+                    if (intersect) isInside = !isInside;
                 }
-                addHtmlToAllChats(msgHtml);
+                return isInside;
             }
-
-            function addUserMessage(message) {
-                const msgHtml = `<div class="flex justify-end"><div class="bg-blue-500 text-white rounded-lg p-3 max-w-sm"><p>${message}</p></div></div>`;
-                addHtmlToAllChats(msgHtml);
-            }
+            
+            function clearCanvas(canvas) { const ctx = canvas.getContext('2d'); ctx.clearRect(0, 0, canvas.width, canvas.height); }
+            function clearAllCanvases() { clearCanvas(overlayCanvas); clearCanvas(spotlightCanvas); activeFinding = null; }
+            function addHtmlToAllChats(html) { chatContainers.forEach(container => { container.insertAdjacentHTML('beforeend', `<div>${html}</div>`); container.scrollTop = container.scrollHeight; }); }
+            function addBotMessage(message, thinking=false) { let msgHtml; if(thinking) { msgHtml = `<div class="flex justify-start"><div class="glass-effect rounded-lg p-3 max-w-sm"><div class="thinking-bubble"><span class="bounce1"></span><span class="bounce2"></span><span class="bounce3"></span></div></div></div>`; } else { msgHtml = `<div class="flex justify-start"><div class="glass-effect rounded-lg p-3 max-w-sm"><p class="text-slate-800">${message}</p></div></div>`; } addHtmlToAllChats(msgHtml); }
+            function addUserMessage(message) { const msgHtml = `<div class="flex justify-end"><div class="bg-blue-500 text-white rounded-lg p-3 max-w-sm"><p>${message}</p></div></div>`; addHtmlToAllChats(msgHtml); }
             
             async function handleUserMessage(inputEl) {
                 const message = inputEl.value.trim();
                 if (!message) return;
-
                 addUserMessage(message);
                 chatInputs.forEach(input => input.value = '');
-                addBotMessage('', true); 
-                
+                addBotMessage('', true);
                 let prompt;
                 if (analysisResults.length > 0) {
                     const findingsContext = analysisResults.map(f => `- ${f.label} (Confiança: ${(f.confidence*100).toFixed(0)}%)`).join('\n');
@@ -480,60 +409,53 @@
                 } else {
                     prompt = `Você é a RadiologIA, uma IA assistente para dentistas. Seja profissional, conciso e responda sempre em português do Brasil. Responda à seguinte pergunta geral de odontologia: "${message}"`;
                 }
-                
                 chatHistory.push({ role: "user", parts: [{ text: prompt }] });
-                
                 try {
-                    const response = await fetch('/chat', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ history: chatHistory }) 
-                    });
-
-                    document.querySelectorAll('.thinking-bubble').forEach(el => {
-                        const wrapper = el.closest('.flex.justify-start');
-                        if (wrapper) wrapper.remove();
-                    });
-
-                    if (!response.ok) {
-                        const errorBody = await response.json();
-                        throw new Error(errorBody.error || `Erro do servidor: ${response.statusText}`);
-                    }
+                    const response = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ history: chatHistory }) });
+                    document.querySelectorAll('.thinking-bubble').forEach(el => { const wrapper = el.closest('.flex.justify-start'); if (wrapper) wrapper.remove(); });
+                    if (!response.ok) { const errorBody = await response.json(); throw new Error(errorBody.error || `Erro do servidor: ${response.statusText}`); }
                     const result = await response.json();
-                    
                     if (result.candidates && result.candidates.length > 0 && result.candidates[0].content.parts[0].text) {
                         const botResponse = result.candidates[0].content.parts[0].text.replace(/\*/g, '');
                         addBotMessage(botResponse);
                         chatHistory.push({ role: "model", parts: [{ text: botResponse }] });
-                    } else { 
-                        throw new Error("Formato de resposta da IA inválido recebido do backend."); 
-                    }
+                    } else { throw new Error("Formato de resposta da IA inválido recebido do backend."); }
                 } catch (error) {
                     console.error("Erro ao chamar o backend:", error);
-                     document.querySelectorAll('.thinking-bubble').forEach(el => {
-                        const wrapper = el.closest('.flex.justify-start');
-                        if (wrapper) wrapper.remove();
-                    });
+                    document.querySelectorAll('.thinking-bubble').forEach(el => { const wrapper = el.closest('.flex.justify-start'); if (wrapper) wrapper.remove(); });
                     addBotMessage(`<b>Falha na Conexão:</b> Não foi possível processar sua solicitação. (${error.message})`);
                 }
             }
             
             function initializeChat() {
-                 chatSends.forEach((button, index) => {
-                     button.addEventListener('click', () => handleUserMessage(chatInputs[index]));
-                 });
-                 chatInputs.forEach(input => {
-                     input.addEventListener('keydown', (e) => {
-                         if (e.key === 'Enter') {
-                             e.preventDefault();
-                             handleUserMessage(input);
-                         }
-                     });
-                 });
+                 chatSends.forEach((button, index) => { button.addEventListener('click', () => handleUserMessage(chatInputs[index])); });
+                 chatInputs.forEach(input => { input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); handleUserMessage(input); } }); });
                  chatHistory = [];
                  addBotMessage("Olá! Sou seu IAssistente. Pode me fazer uma pergunta sobre odontologia ou carregar uma radiografia para análise.");
             }
 
+            // --- Event Listeners ---
+            loginButton.addEventListener('click', handleLogin);
+            passwordInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') handleLogin(); });
+            window.addEventListener('resize', adjustAllCanvases);
+            imageUploadWelcome.addEventListener('change', handleFileUpload);
+            imageUploadAnalysis.addEventListener('change', handleFileUpload);
+            analyzeBtn.addEventListener('click', runAnalysis); // O botão agora também usa a função com trava
+            imageContainer.addEventListener('mousemove', (e) => {
+                if (analysisResults.length === 0) return;
+                const rect = spotlightCanvas.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+                let currentlyHovered = null;
+                for (let i = analysisResults.length - 1; i >= 0; i--) {
+                    const finding = analysisResults[i];
+                    const { width, height } = spotlightCanvas;
+                    const polygonPoints = finding.segmentation.map(p => [(p[0]/100) * width, (p[1]/100) * height]);
+                    if (isPointInPolygon({ x: mouseX, y: mouseY }, polygonPoints)) { currentlyHovered = finding; break; }
+                }
+                if (hoveredFinding?.id !== currentlyHovered?.id) { hoveredFinding = currentlyHovered; drawSpotlight(hoveredFinding); }
+            });
+            imageContainer.addEventListener('mouseleave', () => { hoveredFinding = null; drawSpotlight(null); });
         });
     </script>
 </body>

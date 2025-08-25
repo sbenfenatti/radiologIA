@@ -1,8 +1,9 @@
 # Define a imagem base do Python que vamos usar
 FROM python:3.10
 
-# Instala a dependência do sistema (libgl1) para o OpenCV
-# MUDANÇA: 'libgl1-mesa-glx' foi substituído por 'libgl1'
+# --- CORREÇÃO PRINCIPAL ---
+# Instala a dependência do sistema (libgl1) para o OpenCV.
+# O nome do pacote 'libgl1-mesa-glx' foi atualizado para 'libgl1' na versão base do SO.
 RUN apt-get update && apt-get install -y libgl1
 
 # Cria e define o diretório de trabalho
@@ -23,9 +24,5 @@ COPY . .
 # Expõe a porta que a aplicação usará
 EXPOSE 7860
 
-# --- MUDANÇA PRINCIPAL ---
 # Comando para iniciar o servidor Uvicorn com o FastAPI
-# --host 0.0.0.0: permite conexões externas
-# --port 7860: porta exposta
-# app:app: refere-se ao objeto 'app' dentro do arquivo 'app.py'
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7860"]

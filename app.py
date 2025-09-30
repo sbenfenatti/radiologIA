@@ -1,4 +1,4 @@
-# app.py - Versão com Pipeline Híbrido YOLO + U-Net
+# app.py - VERSÃO CORRIGIDA com ResNet-UNet
 import os
 import io
 import asyncio
@@ -12,6 +12,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import transforms
+import torchvision
 from ultralytics import YOLO
 import httpx
 
@@ -23,97 +24,84 @@ from pydantic import BaseModel, Field
 from typing import List
 
 # -----------------------------------------------------------------------------
-# 1. ARQUITETURA U-NET PARA REFINAMENTO
+# 1. ARQUITETURA RESNET-UNET CORRETA
 # -----------------------------------------------------------------------------
-class DoubleConv(nn.Module):
-    """(convolution => [BN] => ReLU) * 2"""
-    def __init__(self, in_channels, out_channels, mid_channels=None):
+class DecoderBlock(nn.Module):
+    def __init__(self, in_channels, out_channels):
         super().__init__()
-        if not mid_channels:
-            mid_channels = out_channels
-        self.double_conv = nn.Sequential(
-            nn.Conv2d(in_channels, mid_channels, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(mid_channels),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(mid_channels, out_channels, kernel_size=3, padding=1, bias=False),
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, 3, padding=1),
             nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True)
         )
-
-    def forward(self, x):
-        return self.double_conv(x)
-
-class Down(nn.Module):
-    """Downscaling with maxpool then double conv"""
-    def __init__(self, in_channels, out_channels):
-        super().__init__()
-        self.maxpool_conv = nn.Sequential(
-            nn.MaxPool2d(2),
-            DoubleConv(in_channels, out_channels)
+        self.conv2 = nn.Sequential(
+            nn.Conv2d(out_channels, out_channels, 3, padding=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
         )
-
+        
     def forward(self, x):
-        return self.maxpool_conv(x)
+        x = self.conv1(x)
+        x = self.conv2(x)
+        return x
 
-class Up(nn.Module):
-    """Upscaling then double conv"""
-    def __init__(self, in_channels, out_channels, bilinear=True):
-        super().__init__()
-        if bilinear:
-            self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
-            self.conv = DoubleConv(in_channels, out_channels, in_channels // 2)
-        else:
-            self.up = nn.ConvTranspose2d(in_channels, in_channels // 2, kernel_size=2, stride=2)
-            self.conv = DoubleConv(in_channels, out_channels)
-
-    def forward(self, x1, x2):
-        x1 = self.up(x1)
-        diffY = x2.size()[2] - x1.size()[2]
-        diffX = x2.size()[3] - x1.size()[3]
-        x1 = F.pad(x1, [diffX // 2, diffX - diffX // 2,
-                        diffY // 2, diffY - diffY // 2])
-        x = torch.cat([x2, x1], dim=1)
-        return self.conv(x)
-
-class OutConv(nn.Module):
-    def __init__(self, in_channels, out_channels):
-        super(OutConv, self).__init__()
-        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=1)
-
+class ResNetUNet(nn.Module):
+    def __init__(self, n_classes=5):
+        super(ResNetUNet, self).__init__()
+        
+        # ResNet34 como encoder
+        resnet = torchvision.models.resnet34(pretrained=False)
+        
+        # Extrair camadas do ResNet
+        self.encoder = nn.Module()
+        self.encoder.conv1 = resnet.conv1
+        self.encoder.bn1 = resnet.bn1
+        self.encoder.relu = resnet.relu
+        self.encoder.maxpool = resnet.maxpool
+        self.encoder.layer1 = resnet.layer1
+        self.encoder.layer2 = resnet.layer2
+        self.encoder.layer3 = resnet.layer3
+        self.encoder.layer4 = resnet.layer4
+        
+        # Decoder com 5 blocos
+        self.decoder = nn.ModuleList([
+            DecoderBlock(512, 256),  # decoder.blocks.0
+            DecoderBlock(256, 128),  # decoder.blocks.1
+            DecoderBlock(128, 64),   # decoder.blocks.2
+            DecoderBlock(64, 64),    # decoder.blocks.3
+            DecoderBlock(64, 64),    # decoder.blocks.4
+        ])
+        
+        # Cabeça de segmentação
+        self.segmentation_head = nn.Conv2d(64, n_classes, kernel_size=1)
+        
+        # Camada de saída final
+        self.outc = nn.Conv2d(n_classes, n_classes, kernel_size=1)
+        
     def forward(self, x):
-        return self.conv(x)
-
-class UNet(nn.Module):
-    def __init__(self, n_channels=3, n_classes=5, bilinear=False):
-        super(UNet, self).__init__()
-        self.n_channels = n_channels
-        self.n_classes = n_classes
-        self.bilinear = bilinear
-
-        self.inc = DoubleConv(n_channels, 64)
-        self.down1 = Down(64, 128)
-        self.down2 = Down(128, 256)
-        self.down3 = Down(256, 512)
-        factor = 2 if bilinear else 1
-        self.down4 = Down(512, 1024 // factor)
-        self.up1 = Up(1024, 512 // factor, bilinear)
-        self.up2 = Up(512, 256 // factor, bilinear)
-        self.up3 = Up(256, 128 // factor, bilinear)
-        self.up4 = Up(128, 64, bilinear)
-        self.outc = OutConv(64, n_classes)
-
-    def forward(self, x):
-        x1 = self.inc(x)
-        x2 = self.down1(x1)
-        x3 = self.down2(x2)
-        x4 = self.down3(x3)
-        x5 = self.down4(x4)
-        x = self.up1(x5, x4)
-        x = self.up2(x, x3)
-        x = self.up3(x, x2)
-        x = self.up4(x, x1)
-        logits = self.outc(x)
-        return logits
+        # Encoder
+        x = self.encoder.conv1(x)
+        x = self.encoder.bn1(x)
+        x = self.encoder.relu(x)
+        x = self.encoder.maxpool(x)
+        
+        x = self.encoder.layer1(x)
+        x = self.encoder.layer2(x)
+        x = self.encoder.layer3(x)
+        x = self.encoder.layer4(x)
+        
+        # Decoder
+        for decoder_block in self.decoder:
+            x = F.interpolate(x, scale_factor=2, mode='bilinear', align_corners=False)
+            x = decoder_block(x)
+        
+        # Segmentation head
+        x = self.segmentation_head(x)
+        
+        # Output layer
+        x = self.outc(x)
+        
+        return x
 
 # -----------------------------------------------------------------------------
 # 2. DEFINIÇÃO DOS MODELOS DE DADOS (PYDANTIC)
@@ -151,6 +139,7 @@ async def lifespan(app: FastAPI):
     
     try:
         # Carregar modelo YOLO
+        print("📥 Carregando modelo YOLO...")
         lifespan_storage['yolo_model'] = YOLO('models/best.pt')
         print("✅ Modelo YOLO carregado com sucesso.")
         
@@ -158,27 +147,32 @@ async def lifespan(app: FastAPI):
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         print(f"📱 Usando dispositivo: {device}")
         
-        unet_model = UNet(n_channels=3, n_classes=5)
+        print("📥 Carregando modelo ResNet-UNet...")
+        unet_model = ResNetUNet(n_classes=5)
         model_path = 'models/radiologia_5classes_fold_1_best.pth'
         
         if os.path.exists(model_path):
-            unet_model.load_state_dict(torch.load(model_path, map_location=device))
+            print(f"📂 Arquivo encontrado: {model_path}")
+            state_dict = torch.load(model_path, map_location=device)
+            unet_model.load_state_dict(state_dict)
             unet_model.to(device)
             unet_model.eval()
             lifespan_storage['unet_model'] = unet_model
             lifespan_storage['device'] = device
-            print("✅ Modelo U-Net carregado com sucesso.")
+            print("✅ Modelo ResNet-UNet carregado com sucesso.")
         else:
-            print("⚠️ Modelo U-Net não encontrado. Usando apenas YOLO.")
+            print(f"⚠️ Modelo U-Net não encontrado em: {model_path}")
             lifespan_storage['unet_model'] = None
             
     except Exception as e:
         print(f"❌ Erro ao carregar modelos: {e}")
+        print(f"📝 Detalhes do erro: {traceback.format_exc()}")
         lifespan_storage['yolo_model'] = None
         lifespan_storage['unet_model'] = None
     
     lifespan_storage['http_client'] = httpx.AsyncClient()
     print("✅ Cliente HTTP assíncrono criado.")
+    print("🎉 Aplicação iniciada com sucesso!")
     yield
     print("👋 Encerrando a aplicação...")
     await lifespan_storage['http_client'].aclose()
@@ -219,7 +213,9 @@ LABEL_MAP = {
 # 4. FUNÇÕES DE REFINAMENTO U-NET
 # -----------------------------------------------------------------------------
 def preprocess_for_unet(image_pil, target_size=(1052, 512)):
-    """Preprocessa imagem para entrada no U-Net"""
+    """Preprocessa imagem para entrada no ResNet-UNet"""
+    print(f"🔄 Preprocessando imagem para U-Net: {target_size}")
+    
     # Redimensionar para o tamanho do treinamento
     image_resized = image_pil.resize(target_size, Image.LANCZOS)
     
@@ -235,22 +231,30 @@ def preprocess_for_unet(image_pil, target_size=(1052, 512)):
 
 def refine_masks_with_unet(image_pil, yolo_masks, unet_model, device):
     """
-    Refina máscaras do YOLO usando U-Net
+    Refina máscaras do YOLO usando ResNet-UNet
     Foca em mandíbula, maxila e dentes (ignora canal)
     """
+    print("🔬 Iniciando refinamento com U-Net...")
+    
     if unet_model is None:
-        return yolo_masks
+        print("⚠️ Modelo U-Net não disponível, retornando máscaras YOLO originais")
+        return []
     
     try:
         # Preprocessar imagem
         input_tensor, unet_size = preprocess_for_unet(image_pil)
         input_tensor = input_tensor.to(device)
+        print(f"📊 Tensor de entrada: {input_tensor.shape}")
         
         # Predição U-Net
         with torch.no_grad():
+            print("🧠 Executando predição U-Net...")
             unet_output = unet_model(input_tensor)
+            print(f"📊 Saída U-Net: {unet_output.shape}")
+            
             unet_probs = torch.softmax(unet_output, dim=1)
             unet_masks = torch.argmax(unet_probs, dim=1).squeeze(0).cpu().numpy()
+            print(f"📊 Máscaras U-Net: {unet_masks.shape}, classes únicas: {np.unique(unet_masks)}")
         
         # Mapear classes U-Net (assumindo: 0=fundo, 1=mandíbula, 2=maxila, 3=dente, 4=canal)
         unet_class_map = {
@@ -262,20 +266,26 @@ def refine_masks_with_unet(image_pil, yolo_masks, unet_model, device):
         
         refined_masks = []
         original_size = image_pil.size
+        print(f"🔄 Processando refinamento para tamanho original: {original_size}")
         
         # Gerar máscaras refinadas das classes principais
         for class_id, class_name in unet_class_map.items():
             class_mask = (unet_masks == class_id).astype(np.uint8)
+            pixel_count = class_mask.sum()
             
-            if class_mask.sum() > 0:  # Se há pixels desta classe
+            print(f"🔍 Classe {class_name} (ID {class_id}): {pixel_count} pixels")
+            
+            if pixel_count > 100:  # Se há pixels suficientes desta classe
                 # Redimensionar de volta para tamanho original
                 class_mask_resized = cv2.resize(class_mask, original_size, interpolation=cv2.INTER_NEAREST)
                 
                 # Encontrar contornos
                 contours, _ = cv2.findContours(class_mask_resized, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                print(f"🔍 {len(contours)} contornos encontrados para {class_name}")
                 
                 for i, contour in enumerate(contours):
-                    if cv2.contourArea(contour) > 100:  # Filtrar contornos muito pequenos
+                    area = cv2.contourArea(contour)
+                    if area > 100:  # Filtrar contornos muito pequenos
                         # Converter contorno para formato esperado (normalizado)
                         contour_normalized = contour.reshape(-1, 2).astype(float)
                         contour_normalized[:, 0] /= original_size[0]  # normalizar x
@@ -284,16 +294,21 @@ def refine_masks_with_unet(image_pil, yolo_masks, unet_model, device):
                         refined_masks.append({
                             "class_name": class_name,
                             "contour": contour_normalized * 100,  # formato esperado pelo frontend
-                            "confidence": 0.85  # confiança alta para refinamento
+                            "confidence": 0.85,  # confiança alta para refinamento
+                            "area": area
                         })
+                        print(f"✅ Contorno {i} de {class_name}: área={area:.0f}")
         
+        print(f"🎉 Refinamento concluído: {len(refined_masks)} máscaras refinadas")
         return refined_masks
         
     except Exception as e:
-        print(f"⚠️ Erro no refinamento U-Net: {e}")
-        return yolo_masks
+        print(f"❌ Erro no refinamento U-Net: {e}")
+        print(f"📝 Traceback: {traceback.format_exc()}")
+        return []
 
 async def run_model_prediction(model, image):
+    print("🔄 Executando predição YOLO...")
     loop = asyncio.get_event_loop()
     predict_with_args = functools.partial(model.predict, source=image, conf=0.5)
     results = await loop.run_in_executor(None, predict_with_args)
@@ -304,7 +319,10 @@ async def run_model_prediction(model, image):
 # -----------------------------------------------------------------------------
 @app.post("/analyze", response_model=AnalysisResponse)
 async def analyze_image(file: UploadFile = File(...)):
-    print("\n📡 Rota /analyze acessada!")
+    print("\n" + "="*50)
+    print("📡 Rota /analyze acessada!")
+    print("="*50)
+    
     yolo_model = lifespan_storage.get('yolo_model')
     unet_model = lifespan_storage.get('unet_model')
     device = lifespan_storage.get('device', 'cpu')
@@ -313,10 +331,13 @@ async def analyze_image(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail="Modelo YOLO não está carregado.")
     
     try:
+        print("📥 Lendo arquivo de imagem...")
         contents = await file.read()
         image = Image.open(io.BytesIO(contents)).convert("RGB")
+        print(f"📊 Imagem carregada: {image.size}")
         
         # ETAPA 1: Detecção inicial com YOLO
+        print("\n🎯 ETAPA 1: Detecção YOLO")
         results_generator = await run_model_prediction(yolo_model, image)
         results = list(results_generator)
         
@@ -327,28 +348,42 @@ async def analyze_image(file: UploadFile = File(...)):
             return {"findings": []}
 
         prediction = results[0]
-        class_names = prediction.names
+        class_names = prediction.names if hasattr(prediction, 'names') else {}
+        
+        print(f"📊 Classes disponíveis: {class_names}")
 
         # Processar detecções YOLO
         yolo_findings = []
-        if prediction.masks:
+        if hasattr(prediction, 'masks') and prediction.masks is not None:
+            print(f"🔍 Processando {len(prediction.masks)} máscaras YOLO...")
+            
             for i, box in enumerate(prediction.boxes):
-                if i < len(prediction.masks.xyn):
-                    technical_label = class_names.get(int(box.cls[0].item()), "Desconhecido")
-                    friendly_label = LABEL_MAP.get(technical_label, technical_label.replace("_", " ").title())
-                    
-                    mask_points = prediction.masks.xyn[i]
-                    
-                    yolo_findings.append({
-                        "id": f"yolo_finding_{i}",
-                        "label": friendly_label,
-                        "confidence": box.conf[0].item(),
-                        "segmentation": (mask_points * 100).tolist()
-                    })
+                try:
+                    if i < len(prediction.masks.xyn):
+                        cls_id = int(box.cls[0].item()) if hasattr(box.cls[0], 'item') else int(box.cls[0])
+                        technical_label = class_names.get(cls_id, "Desconhecido")
+                        friendly_label = LABEL_MAP.get(technical_label, technical_label.replace("_", " ").title())
+                        
+                        mask_points = prediction.masks.xyn[i]
+                        confidence = float(box.conf[0].item()) if hasattr(box.conf[0], 'item') else float(box.conf[0])
+                        
+                        yolo_findings.append({
+                            "id": f"yolo_finding_{i}",
+                            "label": friendly_label,
+                            "confidence": confidence,
+                            "segmentation": (mask_points * 100).tolist()
+                        })
+                        print(f"✅ YOLO - {friendly_label}: {confidence:.3f}")
+                        
+                except Exception as e:
+                    print(f"⚠️ Erro processando detecção YOLO {i}: {e}")
+                    continue
+        else:
+            print("⚠️ Nenhuma máscara encontrada no resultado YOLO")
 
         # ETAPA 2: Refinamento com U-Net (se disponível)
         if unet_model:
-            print("🔬 Aplicando refinamento U-Net...")
+            print(f"\n🔬 ETAPA 2: Refinamento U-Net")
             refined_masks = refine_masks_with_unet(image, yolo_findings, unet_model, device)
             
             # Adicionar máscaras refinadas
@@ -362,18 +397,25 @@ async def analyze_image(file: UploadFile = File(...)):
                     "confidence": refined_mask["confidence"],
                     "segmentation": refined_mask["contour"].tolist()
                 })
+                print(f"✅ U-Net - {friendly_label} (Refinado): área={refined_mask['area']:.0f}")
+        else:
+            print("⚠️ U-Net não disponível, usando apenas YOLO")
         
         # Adicionar detecções YOLO originais
         all_findings.extend(yolo_findings)
         
         mode = "Híbrido YOLO + U-Net" if unet_model else "Apenas YOLO"
-        print(f"✅ Análise concluída [{mode}]. Enviando {len(all_findings)} achados.")
+        print(f"\n🎉 Análise concluída [{mode}]")
+        print(f"📊 Total de achados: {len(all_findings)}")
+        print("="*50)
+        
         return {"findings": all_findings}
         
     except Exception as e:
         print(f"❌ Erro crítico na análise: {e}")
+        print(f"📝 Traceback completo:")
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail="Erro interno do servidor ao analisar imagem")
+        raise HTTPException(status_code=500, detail=f"Erro interno do servidor ao analisar imagem: {str(e)}")
 
 # -----------------------------------------------------------------------------
 # 6. ENDPOINT CHAT (INALTERADO)

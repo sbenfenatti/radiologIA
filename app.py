@@ -1,4 +1,4 @@
-# app.py - VERSÃO COM SELEÇÃO DE MODELO (YOLO vs U-Net)
+# app.py - VERSÃO COM SELEÇÃO DE MODELO E U-NET OTIMIZADO
 import os
 import io
 import asyncio
@@ -15,6 +15,9 @@ from torchvision import transforms
 import torchvision
 from ultralytics import YOLO
 import httpx
+from scipy import ndimage
+from skimage.measure import label, regionprops
+from skimage.morphology import remove_small_objects, closing, disk
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.staticfiles import StaticFiles
@@ -121,7 +124,8 @@ class Finding(BaseModel):
     label: str
     confidence: float
     segmentation: List[List[float]]
-    model_type: str = "YOLO"  # Novo campo para identificar o modelo usado
+    model_type: str = "YOLO"
+    area: Optional[float] = None
 
 class AnalysisResponse(BaseModel):
     findings: List[Finding]
@@ -172,19 +176,14 @@ async def lifespan(app: FastAPI):
         if os.path.exists(unet_path):
             print(f"📂 Arquivo U-Net encontrado: {unet_path}")
             try:
-                # Tentar carregar com arquitetura padrão U-Net
                 unet_model = UNet(n_channels=3, n_classes=5, bilinear=False)
-                
-                # Carregar estado do modelo
                 checkpoint = torch.load(unet_path, map_location=device)
                 
-                # Se checkpoint é um dict com 'model_state_dict', usar isso
                 if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
                     state_dict = checkpoint['model_state_dict']
                 else:
                     state_dict = checkpoint
                 
-                # Tentar carregar - se falhar, modelo não é compatível
                 unet_model.load_state_dict(state_dict, strict=False)
                 unet_model.to(device)
                 unet_model.eval()
@@ -245,112 +244,253 @@ LABEL_MAP = {
     "canino_sup": "Canino Superior",
 }
 
-# Mapeamento para classes U-Net (assumindo 5 classes baseado no nome do arquivo)
+# Mapeamento para classes U-Net otimizado
 UNET_CLASS_MAP = {
-    0: "background",     # fundo
-    1: "jaw",           # mandíbula  
-    2: "maxila",        # maxila
-    3: "dente",         # dente
-    4: "canal",         # canal radicular
+    0: "background",
+    1: "mandibula",
+    2: "maxila", 
+    3: "dente",
+    4: "canal"
 }
 
 # -----------------------------------------------------------------------------
-# 4. FUNÇÕES DE ANÁLISE COM U-NET
+# 4. FUNÇÕES DE PÓS-PROCESSAMENTO U-NET OTIMIZADAS
 # -----------------------------------------------------------------------------
+def merge_nearby_contours(contours, distance_threshold=50):
+    """Merge contornos próximos para reduzir fragmentação"""
+    if len(contours) <= 1:
+        return contours
+    
+    merged = []
+    used = set()
+    
+    for i, contour1 in enumerate(contours):
+        if i in used:
+            continue
+            
+        # Começar um novo grupo de contornos
+        group = [contour1]
+        used.add(i)
+        
+        # Encontrar contornos próximos
+        for j, contour2 in enumerate(contours):
+            if j in used or i == j:
+                continue
+                
+            # Calcular distância entre centroides
+            M1 = cv2.moments(contour1)
+            M2 = cv2.moments(contour2)
+            
+            if M1["m00"] > 0 and M2["m00"] > 0:
+                cx1, cy1 = int(M1["m10"] / M1["m00"]), int(M1["m01"] / M1["m00"])
+                cx2, cy2 = int(M2["m10"] / M2["m00"]), int(M2["m01"] / M2["m00"])
+                distance = np.sqrt((cx1 - cx2)**2 + (cy1 - cy2)**2)
+                
+                if distance < distance_threshold:
+                    group.append(contour2)
+                    used.add(j)
+        
+        # Se há múltiplos contornos no grupo, merge them
+        if len(group) > 1:
+            # Combinar todos os contornos do grupo
+            combined_contour = np.vstack(group)
+            hull = cv2.convexHull(combined_contour)
+            merged.append(hull)
+        else:
+            merged.append(group[0])
+    
+    return merged
+
+def clean_segmentation_mask(mask, min_area=500, closing_size=3):
+    """Limpa máscara de segmentação removendo ruído e pequenos objetos"""
+    # Aplicar morfologia matemática para fechar buracos
+    if closing_size > 0:
+        kernel = disk(closing_size)
+        mask = closing(mask, kernel)
+    
+    # Remover objetos pequenos
+    mask_cleaned = remove_small_objects(mask.astype(bool), min_size=min_area)
+    
+    return mask_cleaned.astype(np.uint8)
+
+def extract_major_regions(mask, max_regions=5, min_area_ratio=0.05):
+    """Extrai apenas as regiões principais da máscara"""
+    # Rotular regiões conectadas
+    labeled_mask = label(mask)
+    regions = regionprops(labeled_mask)
+    
+    if not regions:
+        return mask
+    
+    # Calcular área total
+    total_area = mask.sum()
+    min_area = total_area * min_area_ratio
+    
+    # Filtrar regiões por tamanho
+    major_regions = [r for r in regions if r.area >= min_area]
+    
+    # Ordenar por área (maiores primeiro)
+    major_regions.sort(key=lambda x: x.area, reverse=True)
+    
+    # Manter apenas as maiores regiões
+    major_regions = major_regions[:max_regions]
+    
+    # Criar nova máscara apenas com regiões principais
+    new_mask = np.zeros_like(mask)
+    for region in major_regions:
+        coords = region.coords
+        new_mask[coords[:, 0], coords[:, 1]] = 1
+    
+    return new_mask
+
 def preprocess_for_unet(image_pil, target_size=(512, 512)):
     """Preprocessa imagem para entrada no U-Net"""
     print(f"🔄 Preprocessando imagem para U-Net: {target_size}")
     
-    # Redimensionar mantendo proporção
     image_resized = image_pil.resize(target_size, Image.LANCZOS)
     
-    # Converter para tensor e normalizar
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], 
                            std=[0.229, 0.224, 0.225])
     ])
     
-    tensor = transform(image_resized).unsqueeze(0)  # Add batch dimension
+    tensor = transform(image_resized).unsqueeze(0)
     return tensor, target_size
 
 def analyze_with_unet(image_pil, unet_model, device):
-    """
-    Analisa imagem usando modelo U-Net
-    """
-    print("🔬 Iniciando análise com U-Net...")
+    """Analisa imagem usando modelo U-Net com pós-processamento otimizado"""
+    print("🔬 Iniciando análise com U-Net otimizada...")
     
     if unet_model is None:
         return []
     
     try:
-        # Preprocessar imagem
         input_tensor, unet_size = preprocess_for_unet(image_pil)
         input_tensor = input_tensor.to(device)
         print(f"📊 Tensor de entrada: {input_tensor.shape}")
         
-        # Predição U-Net
         with torch.no_grad():
             print("🧠 Executando predição U-Net...")
             unet_output = unet_model(input_tensor)
             print(f"📊 Saída U-Net: {unet_output.shape}")
             
-            # Aplicar softmax e obter classes preditas
             unet_probs = torch.softmax(unet_output, dim=1)
             unet_masks = torch.argmax(unet_probs, dim=1).squeeze(0).cpu().numpy()
             probs_numpy = unet_probs.squeeze(0).cpu().numpy()
             
-            print(f"📊 Máscaras U-Net: {unet_masks.shape}, classes únicas: {np.unique(unet_masks)}")
+            unique_classes = np.unique(unet_masks)
+            print(f"📊 Máscaras U-Net: {unet_masks.shape}, classes únicas: {unique_classes}")
         
         findings = []
         original_size = image_pil.size
-        print(f"🔄 Processando segmentações para tamanho original: {original_size}")
+        print(f"🔄 Processando segmentações otimizadas para tamanho original: {original_size}")
         
-        # Processar cada classe (ignorar background = 0)
+        # Parâmetros de filtros específicos por classe
+        class_params = {
+            1: {"min_area": 5000, "max_regions": 2, "merge_distance": 100, "label": "Mandíbula"},    # Mandíbula - grandes regiões
+            2: {"min_area": 3000, "max_regions": 2, "merge_distance": 80, "label": "Maxila"},      # Maxila - grandes regiões  
+            3: {"min_area": 800, "max_regions": 20, "merge_distance": 30, "label": "Dente"},       # Dentes - múltiplas regiões menores
+            4: {"min_area": 200, "max_regions": 10, "merge_distance": 20, "label": "Canal"}        # Canais - regiões pequenas
+        }
+        
         for class_id in range(1, len(UNET_CLASS_MAP)):
             class_name = UNET_CLASS_MAP.get(class_id, f"class_{class_id}")
+            
+            if class_id not in unique_classes:
+                print(f"⚪ Classe {class_name} (ID {class_id}): não detectada")
+                continue
+                
+            params = class_params.get(class_id, {"min_area": 500, "max_regions": 5, "merge_distance": 50, "label": class_name.title()})
+            
+            # Criar máscara binária para a classe
             class_mask = (unet_masks == class_id).astype(np.uint8)
             pixel_count = class_mask.sum()
-            
             print(f"🔍 Classe {class_name} (ID {class_id}): {pixel_count} pixels")
             
-            if pixel_count > 100:  # Filtro de área mínima
-                # Redimensionar de volta para tamanho original
-                class_mask_resized = cv2.resize(class_mask, original_size, interpolation=cv2.INTER_NEAREST)
+            if pixel_count < params["min_area"] // 4:  # Threshold muito baixo
+                print(f"⚪ {class_name}: muito poucos pixels, ignorando")
+                continue
                 
-                # Encontrar contornos
-                contours, _ = cv2.findContours(class_mask_resized, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                print(f"🔍 {len(contours)} contornos encontrados para {class_name}")
+            # Limpeza da máscara
+            class_mask_clean = clean_segmentation_mask(
+                class_mask, 
+                min_area=params["min_area"] // 10,  # Mais permissivo na limpeza inicial
+                closing_size=2
+            )
+            
+            # Extrair apenas regiões principais
+            class_mask_major = extract_major_regions(
+                class_mask_clean,
+                max_regions=params["max_regions"],
+                min_area_ratio=0.01  # 1% da área total da classe
+            )
+            
+            cleaned_pixel_count = class_mask_major.sum()
+            print(f"🧹 {class_name}: {pixel_count} → {cleaned_pixel_count} pixels após limpeza")
+            
+            if cleaned_pixel_count < params["min_area"] // 4:
+                print(f"⚪ {class_name}: área insuficiente após limpeza")
+                continue
+            
+            # Redimensionar para tamanho original
+            class_mask_resized = cv2.resize(
+                class_mask_major, 
+                original_size, 
+                interpolation=cv2.INTER_NEAREST
+            )
+            
+            # Encontrar contornos
+            contours, _ = cv2.findContours(
+                class_mask_resized, 
+                cv2.RETR_EXTERNAL, 
+                cv2.CHAIN_APPROX_SIMPLE
+            )
+            
+            if not contours:
+                continue
                 
-                for i, contour in enumerate(contours):
-                    area = cv2.contourArea(contour)
-                    if area > 200:  # Filtrar contornos pequenos
-                        # Calcular confiança média para esta região
-                        mask_region = np.zeros_like(class_mask_resized)
-                        cv2.fillPoly(mask_region, [contour], 1)
-                        mask_region_original = cv2.resize(mask_region, unet_size, interpolation=cv2.INTER_NEAREST)
-                        confidence = float(probs_numpy[class_id][mask_region_original > 0].mean())
-                        
-                        # Converter contorno para formato esperado (normalizado 0-100)
-                        contour_simplified = cv2.approxPolyDP(contour, 2, True)
-                        contour_normalized = contour_simplified.reshape(-1, 2).astype(float)
-                        contour_normalized[:, 0] = (contour_normalized[:, 0] / original_size[0]) * 100
-                        contour_normalized[:, 1] = (contour_normalized[:, 1] / original_size[1]) * 100
-                        
-                        # Usar label amigável se disponível
-                        friendly_label = LABEL_MAP.get(class_name, class_name.replace("_", " ").title())
-                        
-                        findings.append({
-                            "id": f"unet_finding_{class_id}_{i}",
-                            "label": friendly_label,
-                            "confidence": max(0.5, min(0.99, confidence)),  # Clamp entre 0.5 e 0.99
-                            "segmentation": contour_normalized.tolist(),
-                            "model_type": "U-Net"
-                        })
-                        
-                        print(f"✅ {friendly_label}: confiança={confidence:.3f}, área={area:.0f}")
+            # Merge contornos próximos
+            contours = merge_nearby_contours(contours, params["merge_distance"])
+            print(f"🔗 {class_name}: {len(contours)} contornos após merge")
+            
+            for i, contour in enumerate(contours):
+                area = cv2.contourArea(contour)
+                
+                if area < params["min_area"]:
+                    continue
+                    
+                # Calcular confiança baseada na probabilidade média da região
+                mask_region = np.zeros_like(class_mask_resized)
+                cv2.fillPoly(mask_region, [contour], 1)
+                mask_region_unet = cv2.resize(mask_region, unet_size, interpolation=cv2.INTER_NEAREST)
+                
+                confidence = float(probs_numpy[class_id][mask_region_unet > 0].mean()) if mask_region_unet.sum() > 0 else 0.5
+                
+                # Simplificar contorno
+                epsilon = 0.005 * cv2.arcLength(contour, True)
+                contour_simplified = cv2.approxPolyDP(contour, epsilon, True)
+                
+                if len(contour_simplified) < 3:
+                    continue
+                    
+                # Normalizar coordenadas (0-100)
+                contour_normalized = contour_simplified.reshape(-1, 2).astype(float)
+                contour_normalized[:, 0] = (contour_normalized[:, 0] / original_size[0]) * 100
+                contour_normalized[:, 1] = (contour_normalized[:, 1] / original_size[1]) * 100
+                
+                findings.append({
+                    "id": f"unet_{class_name}_{i}",
+                    "label": params["label"],
+                    "confidence": max(0.5, min(0.95, confidence)),
+                    "segmentation": contour_normalized.tolist(),
+                    "model_type": "U-Net",
+                    "area": area
+                })
+                
+                print(f"✅ {params['label']}: confiança={confidence:.3f}, área={area:.0f}")
         
-        print(f"🎉 Análise U-Net concluída: {len(findings)} achados")
+        print(f"🎉 Análise U-Net otimizada concluída: {len(findings)} achados")
         return findings
         
     except Exception as e:
@@ -367,7 +507,7 @@ async def run_yolo_prediction(model, image):
     return results
 
 def analyze_with_yolo(image, yolo_model):
-    """Analisa imagem usando modelo YOLO (versão síncrona para compatibilidade)"""
+    """Analisa imagem usando modelo YOLO"""
     print("🎯 Iniciando análise com YOLO...")
     
     if yolo_model is None:
@@ -434,7 +574,6 @@ async def analyze_image(file: UploadFile = File(...), model_type: str = Form(def
     unet_model = lifespan_storage.get('unet_model')
     device = lifespan_storage.get('device', 'cpu')
     
-    # Validar modelo solicitado
     model_type = model_type.lower()
     if model_type not in ["yolo", "unet"]:
         raise HTTPException(status_code=400, detail="Tipo de modelo deve ser 'yolo' ou 'unet'")
@@ -451,7 +590,6 @@ async def analyze_image(file: UploadFile = File(...), model_type: str = Form(def
         image = Image.open(io.BytesIO(contents)).convert("RGB")
         print(f"📊 Imagem carregada: {image.size}")
         
-        # Análise baseada no modelo escolhido
         if model_type == "yolo":
             print("🎯 Executando análise com YOLO")
             findings = analyze_with_yolo(image, yolo_model)

@@ -1,9 +1,10 @@
-# app.py - VERSÃO COM SELEÇÃO DE MODELO E U-NET OTIMIZADO
+# app.py - VERSÃO OTIMIZADA COM LOGS DE TEMPO E DEBUGGING U-NET
 import os
 import io
 import asyncio
 import functools 
 import traceback 
+import time
 from contextlib import asynccontextmanager
 import numpy as np
 from PIL import Image
@@ -131,6 +132,7 @@ class AnalysisResponse(BaseModel):
     findings: List[Finding]
     model_used: str
     status: str
+    timing_info: Optional[dict] = None
 
 class ChatPart(BaseModel):
     text: str
@@ -155,21 +157,25 @@ async def lifespan(app: FastAPI):
         print("❌ AVISO: A variável de ambiente 'GEMINI_API_KEY' não foi encontrada.")
     
     try:
-        # Carregar modelo YOLO
+        # Detectar dispositivo
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        print(f"📱 Usando dispositivo: {device}")
+        lifespan_storage['device'] = device
+        
+        # Carregar modelo YOLO com otimizações
         print("📥 Carregando modelo YOLO...")
         yolo_path = 'models/best.pt'
         if os.path.exists(yolo_path):
             lifespan_storage['yolo_model'] = YOLO(yolo_path)
+            # Mover para GPU se disponível
+            if torch.cuda.is_available():
+                lifespan_storage['yolo_model'].to(device)
             print("✅ Modelo YOLO carregado com sucesso.")
         else:
             print(f"⚠️ Modelo YOLO não encontrado em: {yolo_path}")
             lifespan_storage['yolo_model'] = None
         
-        # Carregar modelo U-Net 
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        print(f"📱 Usando dispositivo: {device}")
-        lifespan_storage['device'] = device
-        
+        # Carregar modelo U-Net com debugging melhorado
         print("📥 Tentando carregar modelo U-Net...")
         unet_path = 'models/radiologia_5classes_fold_1_best.pth'
         
@@ -179,21 +185,45 @@ async def lifespan(app: FastAPI):
                 unet_model = UNet(n_channels=3, n_classes=5, bilinear=False)
                 checkpoint = torch.load(unet_path, map_location=device)
                 
-                if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-                    state_dict = checkpoint['model_state_dict']
+                # Debug do checkpoint
+                print(f"🔍 Tipo do checkpoint: {type(checkpoint)}")
+                if isinstance(checkpoint, dict):
+                    print(f"🔍 Chaves do checkpoint: {list(checkpoint.keys())}")
+                    if 'model_state_dict' in checkpoint:
+                        state_dict = checkpoint['model_state_dict']
+                        print("📝 Usando 'model_state_dict'")
+                    else:
+                        state_dict = checkpoint
+                        print("📝 Usando checkpoint diretamente")
                 else:
                     state_dict = checkpoint
+                    print("📝 Checkpoint é o state_dict diretamente")
                 
-                unet_model.load_state_dict(state_dict, strict=False)
+                # Tentar carregar com strict=False para debug
+                missing_keys, unexpected_keys = unet_model.load_state_dict(state_dict, strict=False)
+                if missing_keys:
+                    print(f"⚠️ Chaves faltando: {missing_keys}")
+                if unexpected_keys:
+                    print(f"⚠️ Chaves inesperadas: {unexpected_keys}")
+                
                 unet_model.to(device)
                 unet_model.eval()
                 
                 lifespan_storage['unet_model'] = unet_model
                 print("✅ Modelo U-Net carregado com sucesso.")
                 
+                # Teste rápido do U-Net
+                print("🧪 Testando U-Net com tensor dummy...")
+                with torch.no_grad():
+                    dummy_input = torch.randn(1, 3, 512, 512).to(device)
+                    dummy_output = unet_model(dummy_input)
+                    print(f"📊 Teste U-Net: entrada {dummy_input.shape} -> saída {dummy_output.shape}")
+                    probs = torch.softmax(dummy_output, dim=1)
+                    print(f"📊 Probabilidades por classe: {probs.mean(dim=(2,3)).squeeze()}")
+                
             except Exception as unet_error:
                 print(f"⚠️ Erro ao carregar U-Net: {unet_error}")
-                print("📝 Modelo U-Net incompatível com arquitetura atual")
+                print(f"📝 Traceback U-Net: {traceback.format_exc()}")
                 lifespan_storage['unet_model'] = None
         else:
             print(f"⚠️ Modelo U-Net não encontrado em: {unet_path}")
@@ -242,19 +272,28 @@ LABEL_MAP = {
     "pre_molar_sup": "Pré-Molar Superior",
     "canino_inf": "Canino Inferior",
     "canino_sup": "Canino Superior",
+    "canal_mandibular": "Canal Mandibular",
+    "impactado": "Impactado",
+    "terceiro_ molar_inf": "Terceiro  Molar Inf",
+    "terceiro_molar_sup": "Terceiro Molar Sup",
+    "tto_endo": "Tto Endo",
+    "decay": "Cárie",
+    "filling": "Restauração",
+    "periapical_lesion": "Lesão Periapical",
+    "resto_residual": "Resto Residual"
 }
 
 # Mapeamento para classes U-Net otimizado
 UNET_CLASS_MAP = {
     0: "background",
-    1: "mandibula",
+    1: "mandibula", 
     2: "maxila", 
     3: "dente",
     4: "canal"
 }
 
 # -----------------------------------------------------------------------------
-# 4. FUNÇÕES DE PÓS-PROCESSAMENTO U-NET OTIMIZADAS
+# 4. FUNÇÕES DE PÓS-PROCESSAMENTO U-NET CORRIGIDAS
 # -----------------------------------------------------------------------------
 def merge_nearby_contours(contours, distance_threshold=50):
     """Merge contornos próximos para reduzir fragmentação"""
@@ -359,39 +398,51 @@ def preprocess_for_unet(image_pil, target_size=(512, 512)):
     return tensor, target_size
 
 def analyze_with_unet(image_pil, unet_model, device):
-    """Analisa imagem usando modelo U-Net com pós-processamento otimizado"""
+    """Analisa imagem usando modelo U-Net com debugging melhorado"""
+    start_time = time.time()
     print("🔬 Iniciando análise com U-Net otimizada...")
     
     if unet_model is None:
-        return []
+        return [], {"error": "U-Net model not available"}
     
     try:
+        preprocess_start = time.time()
         input_tensor, unet_size = preprocess_for_unet(image_pil)
         input_tensor = input_tensor.to(device)
-        print(f"📊 Tensor de entrada: {input_tensor.shape}")
+        preprocess_time = time.time() - preprocess_start
+        print(f"📊 Tensor de entrada: {input_tensor.shape} ({preprocess_time:.2f}s)")
         
         with torch.no_grad():
+            inference_start = time.time()
             print("🧠 Executando predição U-Net...")
             unet_output = unet_model(input_tensor)
-            print(f"📊 Saída U-Net: {unet_output.shape}")
+            inference_time = time.time() - inference_start
+            print(f"📊 Saída U-Net: {unet_output.shape} ({inference_time:.2f}s)")
             
+            # Debug das probabilidades
             unet_probs = torch.softmax(unet_output, dim=1)
+            mean_probs = unet_probs.mean(dim=(2,3)).squeeze()
+            print(f"📊 Probabilidades médias por classe: {mean_probs}")
+            max_probs = unet_probs.max(dim=(2,3))[0].squeeze()
+            print(f"📊 Probabilidades máximas por classe: {max_probs}")
+            
             unet_masks = torch.argmax(unet_probs, dim=1).squeeze(0).cpu().numpy()
             probs_numpy = unet_probs.squeeze(0).cpu().numpy()
             
-            unique_classes = np.unique(unet_masks)
-            print(f"📊 Máscaras U-Net: {unet_masks.shape}, classes únicas: {unique_classes}")
+            unique_classes, class_counts = np.unique(unet_masks, return_counts=True)
+            print(f"📊 Máscaras U-Net: {unet_masks.shape}, classes únicas: {dict(zip(unique_classes, class_counts))}")
         
+        postprocess_start = time.time()
         findings = []
         original_size = image_pil.size
         print(f"🔄 Processando segmentações otimizadas para tamanho original: {original_size}")
         
-        # Parâmetros de filtros específicos por classe
+        # Parâmetros de filtros corrigidos
         class_params = {
-            1: {"min_area": 5000, "max_regions": 2, "merge_distance": 100, "label": "Mandíbula"},    # Mandíbula - grandes regiões
-            2: {"min_area": 3000, "max_regions": 2, "merge_distance": 80, "label": "Maxila"},      # Maxila - grandes regiões  
-            3: {"min_area": 800, "max_regions": 20, "merge_distance": 30, "label": "Dente"},       # Dentes - múltiplas regiões menores
-            4: {"min_area": 200, "max_regions": 10, "merge_distance": 20, "label": "Canal"}        # Canais - regiões pequenas
+            1: {"min_area": 1000, "max_regions": 2, "merge_distance": 100, "label": "Mandíbula", "min_confidence": 0.3},
+            2: {"min_area": 1000, "max_regions": 2, "merge_distance": 80, "label": "Maxila", "min_confidence": 0.3},
+            3: {"min_area": 200, "max_regions": 20, "merge_distance": 30, "label": "Dente", "min_confidence": 0.25},
+            4: {"min_area": 100, "max_regions": 10, "merge_distance": 20, "label": "Canal", "min_confidence": 0.2}
         }
         
         for class_id in range(1, len(UNET_CLASS_MAP)):
@@ -401,21 +452,29 @@ def analyze_with_unet(image_pil, unet_model, device):
                 print(f"⚪ Classe {class_name} (ID {class_id}): não detectada")
                 continue
                 
-            params = class_params.get(class_id, {"min_area": 500, "max_regions": 5, "merge_distance": 50, "label": class_name.title()})
+            params = class_params.get(class_id, {"min_area": 500, "max_regions": 5, "merge_distance": 50, "label": class_name.title(), "min_confidence": 0.25})
             
             # Criar máscara binária para a classe
             class_mask = (unet_masks == class_id).astype(np.uint8)
             pixel_count = class_mask.sum()
             print(f"🔍 Classe {class_name} (ID {class_id}): {pixel_count} pixels")
             
-            if pixel_count < params["min_area"] // 4:  # Threshold muito baixo
+            # Verificar confiança média da classe
+            class_confidence = float(probs_numpy[class_id][class_mask > 0].mean()) if pixel_count > 0 else 0.0
+            print(f"🎯 Confiança média da classe {class_name}: {class_confidence:.3f}")
+            
+            if class_confidence < params["min_confidence"]:
+                print(f"⚪ {class_name}: confiança muito baixa ({class_confidence:.3f} < {params['min_confidence']}), ignorando")
+                continue
+                
+            if pixel_count < params["min_area"] // 4:
                 print(f"⚪ {class_name}: muito poucos pixels, ignorando")
                 continue
                 
             # Limpeza da máscara
             class_mask_clean = clean_segmentation_mask(
                 class_mask, 
-                min_area=params["min_area"] // 10,  # Mais permissivo na limpeza inicial
+                min_area=params["min_area"] // 10,
                 closing_size=2
             )
             
@@ -423,7 +482,7 @@ def analyze_with_unet(image_pil, unet_model, device):
             class_mask_major = extract_major_regions(
                 class_mask_clean,
                 max_regions=params["max_regions"],
-                min_area_ratio=0.01  # 1% da área total da classe
+                min_area_ratio=0.02  # 2% da área total da classe
             )
             
             cleaned_pixel_count = class_mask_major.sum()
@@ -465,7 +524,7 @@ def analyze_with_unet(image_pil, unet_model, device):
                 cv2.fillPoly(mask_region, [contour], 1)
                 mask_region_unet = cv2.resize(mask_region, unet_size, interpolation=cv2.INTER_NEAREST)
                 
-                confidence = float(probs_numpy[class_id][mask_region_unet > 0].mean()) if mask_region_unet.sum() > 0 else 0.5
+                confidence = float(probs_numpy[class_id][mask_region_unet > 0].mean()) if mask_region_unet.sum() > 0 else class_confidence
                 
                 # Simplificar contorno
                 epsilon = 0.005 * cv2.arcLength(contour, True)
@@ -490,35 +549,50 @@ def analyze_with_unet(image_pil, unet_model, device):
                 
                 print(f"✅ {params['label']}: confiança={confidence:.3f}, área={area:.0f}")
         
-        print(f"🎉 Análise U-Net otimizada concluída: {len(findings)} achados")
-        return findings
+        postprocess_time = time.time() - postprocess_start
+        total_time = time.time() - start_time
+        
+        timing_info = {
+            "preprocess_time": preprocess_time,
+            "inference_time": inference_time,
+            "postprocess_time": postprocess_time,
+            "total_time": total_time
+        }
+        
+        print(f"🎉 Análise U-Net otimizada concluída: {len(findings)} achados ({total_time:.2f}s total)")
+        return findings, timing_info
         
     except Exception as e:
         print(f"❌ Erro na análise U-Net: {e}")
         print(f"📝 Traceback: {traceback.format_exc()}")
-        return []
+        return [], {"error": str(e)}
 
-async def run_yolo_prediction(model, image):
-    """Executa predição YOLO de forma assíncrona"""
-    print("🔄 Executando predição YOLO...")
-    loop = asyncio.get_event_loop()
-    predict_with_args = functools.partial(model.predict, source=image, conf=0.5)
-    results = await loop.run_in_executor(None, predict_with_args)
-    return results
-
-def analyze_with_yolo(image, yolo_model):
-    """Analisa imagem usando modelo YOLO"""
-    print("🎯 Iniciando análise com YOLO...")
+def analyze_with_yolo(image, yolo_model, device):
+    """Analisa imagem usando modelo YOLO com logs de tempo"""
+    start_time = time.time()
+    print(f"🎯 Iniciando análise com YOLO... Tamanho da imagem: {image.size}")
     
     if yolo_model is None:
-        return []
+        return [], {"error": "YOLO model not available"}
     
     try:
-        results = yolo_model.predict(source=image, conf=0.5)
+        # Configurações otimizadas para YOLO
+        inference_start = time.time()
+        results = yolo_model.predict(
+            source=image, 
+            conf=0.5,
+            device=device if torch.cuda.is_available() else 'cpu',
+            half=torch.cuda.is_available(),  # FP16 se GPU disponível
+            verbose=False  # Reduzir logs verbosos
+        )
+        inference_time = time.time() - inference_start
+        print(f"⏱️ Tempo de inferência YOLO: {inference_time:.2f}s")
+        
+        postprocess_start = time.time()
         findings = []
         
         if not results:
-            return findings
+            return findings, {"inference_time": inference_time, "total_time": time.time() - start_time}
 
         prediction = results[0]
         class_names = prediction.names if hasattr(prediction, 'names') else {}
@@ -554,15 +628,25 @@ def analyze_with_yolo(image, yolo_model):
         else:
             print("⚠️ Nenhuma máscara encontrada no resultado YOLO")
         
-        return findings
+        postprocess_time = time.time() - postprocess_start
+        total_time = time.time() - start_time
+        
+        timing_info = {
+            "inference_time": inference_time,
+            "postprocess_time": postprocess_time,
+            "total_time": total_time
+        }
+        
+        print(f"⏱️ Tempo total YOLO: {total_time:.2f}s (inferência: {inference_time:.2f}s, pós-processamento: {postprocess_time:.2f}s)")
+        return findings, timing_info
         
     except Exception as e:
         print(f"❌ Erro na análise YOLO: {e}")
         print(f"📝 Traceback: {traceback.format_exc()}")
-        return []
+        return [], {"error": str(e)}
 
 # -----------------------------------------------------------------------------
-# 5. ENDPOINT PRINCIPAL COM SELEÇÃO DE MODELO
+# 5. ENDPOINT PRINCIPAL COM SELEÇÃO DE MODELO E TIMING
 # -----------------------------------------------------------------------------
 @app.post("/analyze", response_model=AnalysisResponse)
 async def analyze_image(file: UploadFile = File(...), model_type: str = Form(default="yolo")):
@@ -592,22 +676,25 @@ async def analyze_image(file: UploadFile = File(...), model_type: str = Form(def
         
         if model_type == "yolo":
             print("🎯 Executando análise com YOLO")
-            findings = analyze_with_yolo(image, yolo_model)
+            findings, timing_info = analyze_with_yolo(image, yolo_model, device)
             model_used = "YOLO"
             
         elif model_type == "unet":
             print("🔬 Executando análise com U-Net")
-            findings = analyze_with_unet(image, unet_model, device)
+            findings, timing_info = analyze_with_unet(image, unet_model, device)
             model_used = "U-Net"
         
         print(f"\n🎉 Análise concluída com {model_used}")
         print(f"📊 Total de achados: {len(findings)}")
+        if "total_time" in timing_info:
+            print(f"⏱️ Tempo total: {timing_info['total_time']:.2f}s")
         print("="*50)
         
         return {
             "findings": findings,
             "model_used": model_used,
-            "status": "success"
+            "status": "success",
+            "timing_info": timing_info
         }
         
     except Exception as e:
@@ -628,7 +715,8 @@ async def get_available_models():
     return {
         "yolo": yolo_available,
         "unet": unet_available,
-        "default": "yolo" if yolo_available else ("unet" if unet_available else None)
+        "default": "yolo" if yolo_available else ("unet" if unet_available else None),
+        "device": str(lifespan_storage.get('device', 'cpu'))
     }
 
 # -----------------------------------------------------------------------------

@@ -1,11 +1,12 @@
 ---
-title: RadiologIA - Apoio Diagnóstico
+title: radiologIA_playground
 emoji: 🦷
 colorFrom: blue
-colorTo: green
-sdk: docker
+colorTo: purple
+sdk: fastapi
+app_file: app.py
 pinned: false
-short_description: Assistente de IA para análise de radiografias odontológicas com modelos YOLO e U-Net
+short_description: IA para análise de radiografias odontológicas
 ---
 
 # RadiologIA - Apoio Diagnóstico Odontológico

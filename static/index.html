@@ -67,6 +67,10 @@
             background: rgba(255, 255, 255, 0.4);
             border: 1px solid rgba(255, 255, 255, 0.5);
         }
+        .glass-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
         
         .finding-item { cursor: pointer; transition: background-color 0.2s; }
         .finding-item:hover { background-color: rgba(56, 189, 248, 0.2); }
@@ -84,6 +88,47 @@
         }
         .shake {
             animation: shake 0.82s cubic-bezier(.36,.07,.19,.97) both;
+        }
+        
+        /* Estilos para seleção de modelo */
+        .model-selector {
+            display: flex;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 4px;
+            gap: 4px;
+        }
+        
+        .model-option {
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-weight: 500;
+            font-size: 14px;
+            border: 1px solid transparent;
+        }
+        
+        .model-option.active {
+            background: rgba(255, 255, 255, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            color: #1e293b;
+        }
+        
+        .model-option.inactive {
+            color: #64748b;
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+        
+        .model-option:not(.active):not(.inactive):hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        
+        .model-info {
+            font-size: 12px;
+            color: #64748b;
+            margin-left: 8px;
         }
     </style>
 </head>
@@ -127,8 +172,24 @@
             <div class="flex items-center space-x-3">
                 <img src="https://lh3.googleusercontent.com/d/1pnjD304jKuhy_O_YE-4kQDy42rJvjrCj" alt="RadiologIA Logo" class="h-10 w-auto">
             </div>
+            
+            <!-- Seletor de Modelo -->
             <div class="flex items-center space-x-4">
-                 <label for="image-upload-analysis" class="glass-button cursor-pointer py-2 px-5 rounded-xl">
+                <div class="flex flex-col items-center">
+                    <div class="model-selector" id="model-selector">
+                        <div class="model-option active" data-model="yolo">
+                            YOLO
+                        </div>
+                        <div class="model-option" data-model="unet">
+                            U-Net
+                        </div>
+                    </div>
+                    <div class="model-info" id="model-info">
+                        Detecção de objetos
+                    </div>
+                </div>
+                
+                <label for="image-upload-analysis" class="glass-button cursor-pointer py-2 px-5 rounded-xl">
                     Carregar Nova
                 </label>
                 <input type="file" id="image-upload-analysis" class="hidden" accept="image/*">
@@ -152,6 +213,7 @@
                 <div id="loader" class="hidden absolute inset-0 glass-effect flex-col items-center justify-center z-20">
                     <div class="loader ease-linear rounded-full border-8 border-t-8 border-gray-400 h-24 w-24 mb-4"></div>
                     <p class="text-xl font-semibold">Analisando com IA...</p>
+                    <p class="text-sm text-slate-600 mt-2" id="loader-model-info">Modelo: YOLO</p>
                 </div>
             </div>
 
@@ -224,17 +286,71 @@
             const viewerPlaceholder = document.getElementById('viewer-placeholder');
             const analyzeBtn = document.getElementById('analyze-btn');
             const loader = document.getElementById('loader');
+            const loaderModelInfo = document.getElementById('loader-model-info');
             const overlayCanvas = document.getElementById('overlay-canvas');
             const overlayCtx = overlayCanvas.getContext('2d');
             const spotlightCanvas = document.getElementById('spotlight-canvas');
             const spotlightCtx = spotlightCanvas.getContext('2d');
+            
+            // Elementos do seletor de modelo
+            const modelSelector = document.getElementById('model-selector');
+            const modelInfo = document.getElementById('model-info');
+            const modelOptions = document.querySelectorAll('.model-option');
             
             let analysisResults = [];
             let currentImageFile = null;
             let chatHistory = [];
             let activeFinding = null;
             let hoveredFinding = null;
-            let isAnalyzing = false; // <-- CORREÇÃO: Flag para prevenir análises múltiplas
+            let isAnalyzing = false;
+            let selectedModel = 'yolo';
+            let availableModels = { yolo: true, unet: false };
+            
+            // Informações dos modelos
+            const modelInfoTexts = {
+                'yolo': 'Detecção de objetos',
+                'unet': 'Segmentação detalhada'
+            };
+
+            // --- Funções de Gerenciamento de Modelos ---
+            async function checkAvailableModels() {
+                try {
+                    const response = await fetch('/models/available');
+                    if (response.ok) {
+                        availableModels = await response.json();
+                        updateModelSelector();
+                        
+                        // Usar modelo padrão se o selecionado não estiver disponível
+                        if (!availableModels[selectedModel] && availableModels.default) {
+                            selectedModel = availableModels.default;
+                        }
+                    }
+                } catch (error) {
+                    console.error('Erro ao verificar modelos disponíveis:', error);
+                }
+            }
+            
+            function updateModelSelector() {
+                modelOptions.forEach(option => {
+                    const model = option.dataset.model;
+                    option.classList.remove('active', 'inactive');
+                    
+                    if (!availableModels[model]) {
+                        option.classList.add('inactive');
+                    } else if (model === selectedModel) {
+                        option.classList.add('active');
+                    }
+                });
+                
+                modelInfo.textContent = modelInfoTexts[selectedModel] || 'Modelo selecionado';
+            }
+            
+            function selectModel(modelType) {
+                if (availableModels[modelType] && modelType !== selectedModel) {
+                    selectedModel = modelType;
+                    updateModelSelector();
+                }
+            }
 
             // --- Funções Principais ---
             const handleLogin = () => {
@@ -243,6 +359,7 @@
                     welcomePage.classList.remove('hidden');
                     welcomePage.classList.add('flex');
                     initializeChat();
+                    checkAvailableModels(); // Verificar modelos disponíveis ao fazer login
                 } else {
                     errorMessage.textContent = 'Senha incorreta.';
                     passwordInput.classList.add('shake');
@@ -291,6 +408,7 @@
                         analysisPage.classList.add('flex');
                         initViewer(event.target.result);
                         clearAllCanvases();
+                        checkAvailableModels(); // Atualizar modelos ao carregar nova imagem
                         // Dispara a análise automaticamente após o upload
                         runAnalysis();
                     }
@@ -298,40 +416,51 @@
                 }
             };
 
-            // CORREÇÃO: A lógica de análise foi movida para sua própria função para melhor controle.
+            // Função de análise com modelo selecionado
             async function runAnalysis() {
-                if (!currentImageFile || isAnalyzing) return; // Verifica a flag
+                if (!currentImageFile || isAnalyzing) return;
 
-                isAnalyzing = true; // Ativa a trava
+                // Verificar se o modelo selecionado está disponível
+                if (!availableModels[selectedModel]) {
+                    addBotMessage(`❌ Modelo ${selectedModel.toUpperCase()} não está disponível. Selecione outro modelo.`);
+                    return;
+                }
+
+                isAnalyzing = true;
                 loader.classList.remove('hidden');
                 loader.classList.add('flex');
+                loaderModelInfo.textContent = `Modelo: ${selectedModel.toUpperCase()}`;
                 clearAllCanvases();
+                
                 const formData = new FormData();
                 formData.append('file', currentImageFile);
+                formData.append('model_type', selectedModel);
 
                 try {
                     const response = await fetch('/analyze', { method: 'POST', body: formData });
                     if (!response.ok) {
                         const errorData = await response.json();
-                        throw new Error(errorData.error || `Erro HTTP! status: ${response.status}`);
+                        throw new Error(errorData.detail || `Erro HTTP! status: ${response.status}`);
                     }
                     const data = await response.json();
                     analysisResults = data.findings;
-                    displayFindingsList(analysisResults);
+                    displayFindingsList(analysisResults, data.model_used);
                 } catch (error) {
                     console.error('Erro ao analisar imagem:', error);
-                    addBotMessage(`<b>Falha na Conexão:</b> Não foi possível conectar ao servidor de análise.`);
+                    addBotMessage(`<b>Falha na Conexão:</b> ${error.message}`);
                 } finally {
                     loader.classList.add('hidden');
                     loader.classList.remove('flex');
-                    isAnalyzing = false; // Libera a trava
+                    isAnalyzing = false;
                 }
             }
 
-            function displayFindingsList(findings) {
+            function displayFindingsList(findings, modelUsed) {
                 const findingsCount = findings.length;
-                let message = `Análise completa. Identifiquei ${findingsCount} achados. Clique para visualizar ou me faça uma pergunta.`;
-                if(findingsCount === 0) { message = "Análise completa. Nenhum achado detectado."; }
+                let message = `Análise completa com ${modelUsed}. Identifiquei ${findingsCount} achados. Clique para visualizar ou me faça uma pergunta.`;
+                if(findingsCount === 0) { 
+                    message = `Análise completa com ${modelUsed}. Nenhum achado detectado.`; 
+                }
                 
                 let findingsHtml = `<div class="glass-effect rounded-lg p-3 w-full"><p class="mb-3">${message}</p><div class="space-y-2">${findings.map(finding => `<div class="finding-item bg-white/20 p-2 rounded-md flex justify-between items-center" data-finding-id="${finding.id}"><span>${finding.label}</span><span class="text-xs text-slate-600">${(finding.confidence * 100).toFixed(0)}%</span></div>`).join('')}</div></div>`;
                 addHtmlToAllChats(findingsHtml);
@@ -440,7 +569,16 @@
             window.addEventListener('resize', adjustAllCanvases);
             imageUploadWelcome.addEventListener('change', handleFileUpload);
             imageUploadAnalysis.addEventListener('change', handleFileUpload);
-            analyzeBtn.addEventListener('click', runAnalysis); // O botão agora também usa a função com trava
+            analyzeBtn.addEventListener('click', runAnalysis);
+            
+            // Event listeners para seleção de modelo
+            modelOptions.forEach(option => {
+                option.addEventListener('click', () => {
+                    const modelType = option.dataset.model;
+                    selectModel(modelType);
+                });
+            });
+            
             imageContainer.addEventListener('mousemove', (e) => {
                 if (analysisResults.length === 0) return;
                 const rect = spotlightCanvas.getBoundingClientRect();
@@ -456,6 +594,9 @@
                 if (hoveredFinding?.id !== currentlyHovered?.id) { hoveredFinding = currentlyHovered; drawSpotlight(hoveredFinding); }
             });
             imageContainer.addEventListener('mouseleave', () => { hoveredFinding = null; drawSpotlight(null); });
+            
+            // Inicializar seletor de modelo
+            updateModelSelector();
         });
     </script>
 </body>

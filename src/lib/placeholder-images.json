@@ -1,0 +1,53 @@
+{
+  "placeholderImages": [
+    {
+      "id": "xray-1",
+      "name": "X-Ray_001.jpg",
+      "description": "A dental X-ray showing a full set of teeth.",
+      "imageUrl": "https://images.unsplash.com/photo-1656623807884-f6c9b7f389e9?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3NDE5ODJ8MHwxfHNlYXJjaHwxMHx8ZGVudGFsJTIweHJheXxlbnwwfHx8fDE3Njc2NDEzNDN8MA&ixlib=rb-4.1.0&q=80&w=1080",
+      "imageHint": "dental xray"
+    },
+    {
+      "id": "xray-2",
+      "name": "X-Ray_002.jpg",
+      "description": "A dental X-ray with a focus on the molars.",
+      "imageUrl": "https://images.unsplash.com/photo-1694345162188-2e5c06fe75e7?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3NDE5ODJ8MHwxfHNlYXJjaHw3fHxkZW50YWwlMjB4cmF5fGVufDB8fHx8MTc2NzY0MTM0M3ww&ixlib=rb-4.1.0&q=80&w=1080",
+      "imageHint": "dental xray"
+    },
+    {
+      "id": "xray-3",
+      "name": "X-Ray_003.jpg",
+      "description": "A panoramic dental X-ray.",
+      "imageUrl": "https://images.unsplash.com/photo-1694364596448-790bbe1752fa?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3NDE5ODJ8MHwxfHNlYXJjaHw3fHxkZW50YWwlMjB4cmF5JTIwcGFub3JhbWljfGVufDB8fHx8MTc2NzcyOTQyOHww&ixlib=rb-4.1.0&q=80&w=1080",
+      "imageHint": "dental xray panoramic"
+    },
+    {
+      "id": "xray-4",
+      "name": "X-Ray_004.jpg",
+      "description": "A dental X-ray showing an implant.",
+      "imageUrl": "https://images.unsplash.com/photo-1593022356269-609ed284b3c3?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3NDE5ODJ8MHwxfHNlYXJjaHw4fHxkZW50YWwlMjBpbXBsYW50fGVufDB8fHx8MTc2NzcyMjE4MHww&ixlib=rb-4.1.0&q=80&w=1080",
+      "imageHint": "dental implant"
+    },
+    {
+      "id": "xray-5",
+      "name": "X-Ray_005.jpg",
+      "description": "A child's dental X-ray.",
+      "imageUrl": "https://images.unsplash.com/photo-1590308852759-faccf7634f0c?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3NDE5ODJ8MHwxfHNlYXJjaHwxfHxjaGlsZCUyMHhyYXl8ZW58MHx8fHwxNzY3NzI5NDI4fDA&ixlib=rb-4.1.0&q=80&w=1080",
+      "imageHint": "child xray"
+    },
+    {
+      "id": "xray-6",
+      "name": "X-Ray_006.jpg",
+      "description": "A dental X-ray with visible caries.",
+      "imageUrl": "https://images.unsplash.com/photo-1669142742575-feed7bff9f9e?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3NDE5ODJ8MHwxfHNlYXJjaHwxfHxkZW50YWwlMjBjYXJpZXN8ZW58MHx8fHwxNzY3NzI5NDI4fDA&ixlib=rb-4.1.0&q=80&w=1080",
+      "imageHint": "dental caries"
+    },
+    {
+      "id": "xray-7",
+      "name": "X-Ray_007.jpg",
+      "description": "An X-ray showing wisdom teeth.",
+      "imageUrl": "https://images.unsplash.com/photo-1677948855509-c12a2b67d304?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3NDE5ODJ8MHwxfHNlYXJjaHw2fHx3aXNkb20lMjB0ZWV0aHxlbnwwfHx8fDE3Njc3Mjk0Mjh8MA&ixlib=rb-4.1.0&q=80&w=1080",
+      "imageHint": "wisdom teeth"
+    }
+  ]
+}

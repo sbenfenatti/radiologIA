@@ -22,6 +22,7 @@ MVP do RadiologIA: interface de login e landing inicial para um assistente de di
    ```bash
    NEXT_PUBLIC_SUPABASE_URL=...
    NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+   ACCESS_TOKENS=token1,token2
    ```
 3) Rode o app:
    ```bash
@@ -45,3 +46,6 @@ MVP do RadiologIA: interface de login e landing inicial para um assistente de di
 Configure as variáveis de ambiente do Supabase no painel da Vercel:
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+
+Para login por token, adicione:
+- `ACCESS_TOKENS` (lista separada por vírgula)

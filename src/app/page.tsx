@@ -27,6 +27,8 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { cn } from '@/lib/utils';
+import { supabase } from '@/lib/supabase/client';
+import { useSupabaseUser } from '@/hooks/use-supabase-user';
 
 const loginSchema = z.object({
   email: z.string().email({ message: 'Por favor, insira um e-mail válido.' }),
@@ -37,9 +39,11 @@ type LoginFormValues = z.infer<typeof loginSchema>;
 
 export default function LoginPage() {
   const router = useRouter();
+  const { user, isLoading } = useSupabaseUser();
 
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isTokenSubmitting, setIsTokenSubmitting] = useState(false);
   const [showOptions, setShowOptions] = useState(false);
   const [token, setToken] = useState('');
   const [isDarkMode, setIsDarkMode] = useState(false);
@@ -79,8 +83,16 @@ export default function LoginPage() {
   const onSubmit = async (data: LoginFormValues) => {
     setIsSubmitting(true);
     try {
-      console.log('OTP login will be wired to Supabase next.', data.email);
-      alert('Login via OTP será configurado no próximo passo.');
+      const { error } = await supabase.auth.signInWithPassword({
+        email: data.email,
+        password: data.password,
+      });
+      if (error) {
+        console.error(error);
+        alert('E-mail ou senha inválidos.');
+        return;
+      }
+      router.push('/dashboard');
     } catch (error) {
       console.error(error);
     } finally {
@@ -88,13 +100,44 @@ export default function LoginPage() {
     }
   };
 
-  const handleTokenSubmit = () => {
-    if (token.toUpperCase() === 'PRO2026') {
+  const handleTokenSubmit = async () => {
+    if (!token.trim()) {
+      alert('Informe o token.');
+      return;
+    }
+    setIsTokenSubmitting(true);
+    try {
+      const response = await fetch('/api/token-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+      });
+      if (!response.ok) {
+        alert('🚫 Token inválido.');
+        return;
+      }
       router.push('/dashboard');
-    } else {
-      alert('🚫 Token Inválido.');
+    } catch (error) {
+      console.error(error);
+      alert('Não foi possível validar o token.');
+    } finally {
+      setIsTokenSubmitting(false);
     }
   };
+
+  useEffect(() => {
+    if (!isLoading && user) {
+      router.push('/dashboard');
+    }
+  }, [isLoading, user, router]);
+
+  if (isLoading || user) {
+    return (
+      <div className="flex h-screen w-full items-center justify-center bg-gray-50 dark:bg-[#001e45]">
+        <div className="w-8 h-8 border-4 border-brand-green border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center relative overflow-hidden transition-colors duration-500 text-gray-900 dark:text-gray-100 p-4">
@@ -106,12 +149,15 @@ export default function LoginPage() {
         {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
       </button>
 
-      <div className="absolute inset-0 w-full h-full overflow-hidden -z-10">
+      <div className="absolute inset-0 w-full h-full overflow-hidden -z-10 flag-stage">
         <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 brightness-100 contrast-150 mix-blend-overlay"></div>
-        <div className="flag-shape flag-green"></div>
-        <div className="flag-shape flag-yellow"></div>
-        <div className="flag-shape flag-blue"></div>
-        <div className="flag-glow"></div>
+        <div className="flag-canvas">
+          <div className="flag-shape flag-green"></div>
+          <div className="flag-shape flag-yellow"></div>
+          <div className="flag-shape flag-blue"></div>
+          <div className="flag-glow"></div>
+        </div>
+        <div className="flag-glass"></div>
       </div>
 
       <div className="w-full max-w-[30rem] sm:max-w-[34rem] lg:max-w-[38rem] glass-panel rounded-3xl shadow-2xl overflow-hidden relative z-10 animate-fade-in-up ring-1 ring-white/40 dark:ring-white/5">
@@ -122,7 +168,7 @@ export default function LoginPage() {
             <img
               src="https://i.ibb.co/9HFVnY4x/Gemini-Generated-Image-oc1jgfoc1jgfoc1j-Photoroom.png"
               alt="Logo RadiologIA"
-              className="relative w-full h-full object-contain transition-transform hover:scale-105 duration-300 drop-shadow-md"
+              className="relative w-full h-full object-contain transition-transform hover:scale-105 duration-300 drop-shadow-md logo-flag-sync"
               onError={(e) => {
                 (e.target as HTMLImageElement).style.display = 'none';
                 document.getElementById('fallback-logo')?.classList.remove('hidden');
@@ -270,10 +316,15 @@ export default function LoginPage() {
                 <button
                   type="button"
                   onClick={handleTokenSubmit}
-                  className="p-2.5 bg-brand-yellow hover:bg-yellow-400 text-brand-blue font-bold rounded-lg transition-all shadow-sm hover:shadow-md flex items-center justify-center aspect-square border border-brand-yellow"
+                  disabled={isTokenSubmitting}
+                  className="p-2.5 bg-brand-yellow hover:bg-yellow-400 text-brand-blue font-bold rounded-lg transition-all shadow-sm hover:shadow-md flex items-center justify-center aspect-square border border-brand-yellow disabled:opacity-70 disabled:cursor-not-allowed"
                   title="Entrar com Token"
                 >
-                  <ArrowRight className="w-5 h-5" />
+                  {isTokenSubmitting ? (
+                    <div className="w-5 h-5 border-2 border-brand-blue/30 border-t-brand-blue rounded-full animate-spin-custom"></div>
+                  ) : (
+                    <ArrowRight className="w-5 h-5" />
+                  )}
                 </button>
               </div>
             </div>

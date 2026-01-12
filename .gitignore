@@ -5,3 +5,8 @@ firebase-debug.log
 backup-*
 .env.local
 .env.*.local
+*.pth
+*.pt
+docs/batch_test/
+docs/batch_test.zip
+docs/v1/

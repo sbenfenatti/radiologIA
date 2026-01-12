@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RadiologIA - Debug Station</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; overflow: hidden; }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        
+        /* Console Scrollbar */
+        .console-scroll::-webkit-scrollbar { width: 8px; }
+        .console-scroll::-webkit-scrollbar-track { background: #1e293b; }
+        .console-scroll::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+        .console-scroll::-webkit-scrollbar-thumb:hover { background: #64748b; }
+
+        .json-key { color: #9cdcfe; }
+        .json-string { color: #ce9178; }
+        .json-number { color: #b5cea8; }
+        .json-boolean { color: #569cd6; }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-200 h-screen flex flex-col">
+
+    <!-- HEADER DE ENGENHARIA -->
+    <header class="bg-slate-950 border-b border-slate-800 p-3 flex justify-between items-center shadow-md">
+        <div class="flex items-center gap-3">
+            <div class="h-3 w-3 rounded-full bg-green-500 animate-pulse"></div>
+            <h1 class="text-lg font-bold tracking-tight text-white">RADIOLOG<span class="text-blue-500">IA</span> <span class="text-xs bg-slate-800 px-2 py-0.5 rounded text-slate-400 font-mono">DEV_MODE_V3</span></h1>
+            <div class="h-6 w-px bg-slate-700 mx-2"></div>
+            <div class="flex bg-slate-800 rounded p-1">
+                <button onclick="setModel('mask_rcnn')" id="btn-mask" class="px-3 py-1 text-xs font-bold rounded bg-blue-600 text-white transition-all">MASK R-CNN</button>
+                <button onclick="setModel('yolo')" id="btn-yolo" class="px-3 py-1 text-xs font-bold rounded text-slate-400 hover:text-white transition-all">YOLOv11</button>
+            </div>
+        </div>
+        <div class="flex gap-3">
+            <input type="file" id="file-upload" class="hidden" accept="image/*">
+            <label for="file-upload" class="cursor-pointer bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-mono py-2 px-4 rounded flex items-center gap-2 transition-colors">
+                <span>[UPLOAD_IMG]</span>
+            </label>
+            <button id="analyze-btn" disabled class="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-mono font-bold py-2 px-6 rounded transition-colors shadow-lg shadow-blue-900/20">
+                EXECUTE_ANALYSIS()
+            </button>
+        </div>
+    </header>
+
+    <!-- ÁREA PRINCIPAL -->
+    <main class="flex-grow flex overflow-hidden">
+        
+        <!-- COLUNA 1: VISUAL (50%) -->
+        <div class="w-1/2 flex flex-col border-r border-slate-800 bg-slate-900">
+            
+            <!-- Viewer -->
+            <div class="h-3/5 relative bg-[url('https://www.transparenttextures.com/patterns/dark-matter.png')] flex items-center justify-center border-b border-slate-800 p-4">
+                <div id="placeholder" class="text-slate-600 font-mono text-sm text-center">
+                    NO_SIGNAL<br><span class="text-xs opacity-50">Carregue uma imagem</span>
+                </div>
+                <div id="img-wrapper" class="hidden relative max-w-full max-h-full shadow-2xl">
+                    <img id="radiograph-img" class="max-w-full max-h-full object-contain border border-slate-700">
+                    <canvas id="overlay-canvas" class="absolute top-0 left-0 w-full h-full pointer-events-none"></canvas>
+                </div>
+                <!-- Loader Overlay -->
+                <div id="loader" class="hidden absolute top-4 right-4 bg-black/80 text-blue-400 px-3 py-1 text-xs font-mono border border-blue-900 rounded flex items-center gap-2">
+                    <span class="animate-spin">⟳</span> PROCESSING...
+                </div>
+            </div>
+
+            <!-- Chat Interativo -->
+            <div class="h-2/5 flex flex-col bg-slate-900">
+                <div class="p-2 border-b border-slate-800 bg-slate-950 text-xs font-mono text-slate-400 flex justify-between">
+                    <span>CHAT_INTERFACE (Gemini 3 Flash)</span>
+                    <span id="chat-status" class="text-green-500">● READY</span>
+                </div>
+                <div id="chat-history" class="flex-grow p-4 overflow-y-auto space-y-3 font-mono text-sm console-scroll bg-slate-900">
+                    <div class="text-slate-500 italic text-xs">> Aguardando contexto da imagem...</div>
+                </div>
+                <div class="p-3 bg-slate-950 border-t border-slate-800 flex gap-2">
+                    <input type="text" id="chat-input" placeholder="Type command/query..." class="flex-grow bg-slate-900 border border-slate-700 text-slate-200 text-sm px-3 py-2 rounded focus:outline-none focus:border-blue-500 font-mono">
+                    <button id="send-chat" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded font-bold transition-colors">></button>
+                </div>
+            </div>
+        </div>
+
+        <!-- COLUNA 2: TERMINAL / DEBUG (50%) -->
+        <div class="w-1/2 flex flex-col bg-[#0d1117] text-slate-300 font-mono text-xs">
+            <div class="p-2 border-b border-slate-800 bg-[#010409] flex justify-between items-center sticky top-0">
+                <span class="font-bold text-slate-400">DEBUG CONSOLE / TELEMETRY</span>
+                <button onclick="clearConsole()" class="text-red-400 hover:text-red-300 text-[10px] border border-red-900 bg-red-900/20 px-2 py-0.5 rounded transition-colors">CLEAR_LOGS</button>
+            </div>
+            
+            <div id="console-output" class="flex-grow p-4 overflow-y-auto console-scroll space-y-4 pb-20">
+                <div class="text-slate-500">
+                    <span class="text-blue-500">[SYSTEM]</span> Initializing RadiologIA v2.1 Client...<br>
+                    <span class="text-blue-500">[SYSTEM]</span> Target API: <span id="api-url-display" class="text-yellow-500">...</span>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <script>
+        // --- CONFIGURAÇÃO DE DEBUG ---
+        // ATUALIZADO: Usando a URL que apareceu no seu log do terminal
+        const BASE_API_URL = "https://sbenfenatti--radiologia-backend-prod-radiologiabackend-f-c42b61.modal.run"; 
+        
+        // Exibe a URL no console visual
+        document.getElementById('api-url-display').textContent = BASE_API_URL;
+
+        let currentModel = 'mask_rcnn';
+        let currentImageFile = null;
+        let lastFindingsRaw = null; // Guarda o JSON bruto
+        let chatContext = ""; 
+        let chatHistory = [];
+
+        // --- SISTEMA DE LOG VISUAL ---
+        function log(type, title, data = null) {
+            const consoleDiv = document.getElementById('console-output');
+            const entry = document.createElement('div');
+            const time = new Date().toLocaleTimeString('pt-BR', {hour12: false}) + '.' + new Date().getMilliseconds();
+            
+            let colorClass = "text-slate-300";
+            let icon = "➤";
+            
+            if (type === 'REQ') { colorClass = "text-blue-400"; icon = "⬆"; }
+            if (type === 'RES') { colorClass = "text-green-400"; icon = "⬇"; }
+            if (type === 'ERR') { colorClass = "text-red-400"; icon = "✖"; }
+            if (type === 'INFO') { colorClass = "text-yellow-400"; icon = "ℹ"; }
+
+            let html = `
+                <div class="border-l-2 ${type === 'ERR' ? 'border-red-500' : 'border-slate-700'} pl-2 animate-fade-in">
+                    <div class="${colorClass} font-bold flex justify-between">
+                        <span>${icon} [${type}] ${title}</span>
+                        <span class="text-slate-600 text-[10px]">${time}</span>
+                    </div>
+            `;
+
+            if (data) {
+                if (typeof data === 'object') {
+                    // Formatação bonita de JSON
+                    const jsonStr = JSON.stringify(data, null, 2);
+                    html += `<pre class="mt-1 bg-[#161b22] p-2 rounded text-[10px] overflow-x-auto text-slate-300 select-all">${syntaxHighlight(jsonStr)}</pre>`;
+                } else {
+                    html += `<div class="mt-1 text-slate-400 text-[11px] whitespace-pre-wrap">${data}</div>`;
+                }
+            }
+            html += `</div>`;
+
+            entry.innerHTML = html;
+            consoleDiv.appendChild(entry);
+            consoleDiv.scrollTop = consoleDiv.scrollHeight;
+        }
+
+        function syntaxHighlight(json) {
+            json = json.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            return json.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, function (match) {
+                var cls = 'json-number';
+                if (/^"/.test(match)) {
+                    if (/:$/.test(match)) {
+                        cls = 'json-key';
+                    } else {
+                        cls = 'json-string';
+                    }
+                } else if (/true|false/.test(match)) {
+                    cls = 'json-boolean';
+                } else if (/null/.test(match)) {
+                    cls = 'json-boolean'; // null
+                }
+                return '<span class="' + cls + '">' + match + '</span>';
+            });
+        }
+
+        function clearConsole() {
+            document.getElementById('console-output').innerHTML = '<div class="text-slate-500 italic">Logs cleared.</div>';
+        }
+
+        // --- LÓGICA DO APP ---
+
+        window.setModel = (model) => {
+            currentModel = model;
+            document.getElementById('btn-mask').className = model === 'mask_rcnn' ? 'px-3 py-1 text-xs font-bold rounded bg-blue-600 text-white transition-all' : 'px-3 py-1 text-xs font-bold rounded text-slate-400 hover:text-white transition-all';
+            document.getElementById('btn-yolo').className = model === 'yolo' ? 'px-3 py-1 text-xs font-bold rounded bg-blue-600 text-white transition-all' : 'px-3 py-1 text-xs font-bold rounded text-slate-400 hover:text-white transition-all';
+            log('INFO', `Modelo alterado para: ${model.toUpperCase()}`);
+        };
+
+        document.getElementById('file-upload').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if(file) {
+                currentImageFile = file;
+                const img = document.getElementById('radiograph-img');
+                img.src = URL.createObjectURL(file);
+                
+                document.getElementById('placeholder').classList.add('hidden');
+                document.getElementById('img-wrapper').classList.remove('hidden');
+                document.getElementById('analyze-btn').disabled = false;
+                
+                // Limpa
+                const ctx = document.getElementById('overlay-canvas').getContext('2d');
+                ctx.clearRect(0, 0, 10000, 10000);
+                
+                log('INFO', 'Nova imagem carregada', { name: file.name, size: file.size, type: file.type });
+            }
+        });
+
+        document.getElementById('analyze-btn').addEventListener('click', async () => {
+            if(!currentImageFile) return;
+            
+            const loader = document.getElementById('loader');
+            loader.classList.remove('hidden');
+            
+            const formData = new FormData();
+            formData.append('file', currentImageFile);
+            formData.append('model_type', currentModel);
+
+            log('REQ', `Iniciando POST /analyze`, { model: currentModel });
+
+            try {
+                const startTime = performance.now();
+                const response = await fetch(`${BASE_API_URL}/analyze`, { method: 'POST', body: formData });
+                const endTime = performance.now();
+                const duration = (endTime - startTime).toFixed(0) + 'ms';
+
+                if(!response.ok) {
+                    const text = await response.text();
+                    throw new Error(`Status ${response.status}: ${text}`);
+                }
+                
+                const data = await response.json();
+                lastFindingsRaw = data;
+
+                log('RES', `Sucesso (${duration})`, data);
+
+                if(data.findings) {
+                    drawFindings(data.findings);
+                    // Gera o contexto para o chat
+                    chatContext = data.findings.map(f => `- ${f.label} (Confiança: ${(f.confidence*100).toFixed(1)}%)`).join('\n');
+                    log('INFO', 'Contexto extraído para o Chat', chatContext);
+                    
+                    addChatMessage('system', `Análise finalizada (${data.findings.length} achados). Logs disponíveis ao lado. ->`);
+                } else {
+                    log('WARN', 'Nenhum achado retornado no JSON', data);
+                }
+
+            } catch (error) {
+                log('ERR', 'Falha na Análise', error.message);
+                addChatMessage('system', 'Erro na análise. Verifique o console à direita.');
+            } finally {
+                loader.classList.add('hidden');
+            }
+        });
+
+        // --- LÓGICA DO CHAT ---
+
+        document.getElementById('send-chat').addEventListener('click', sendChat);
+        document.getElementById('chat-input').addEventListener('keypress', (e) => { if(e.key === 'Enter') sendChat() });
+
+        async function sendChat() {
+            const input = document.getElementById('chat-input');
+            const text = input.value.trim();
+            if(!text) return;
+
+            addChatMessage('user', text);
+            input.value = '';
+
+            const historyPayload = chatHistory.map(m => ({ role: m.role, text: m.text }));
+            
+            // Log do Payload exato que vai pro Gemini
+            const payload = {
+                context: chatContext || "(Sem contexto de imagem)",
+                history: historyPayload
+            };
+            
+            log('REQ', 'Enviando POST /chat', payload);
+            document.getElementById('chat-status').innerText = "● THINKING...";
+            document.getElementById('chat-status').className = "text-yellow-500 animate-pulse";
+
+            try {
+                const startTime = performance.now();
+                const response = await fetch(`${BASE_API_URL}/chat`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                if(!response.ok) {
+                    const errText = await response.text();
+                    throw new Error(errText);
+                }
+
+                const data = await response.json();
+                const duration = (performance.now() - startTime).toFixed(0) + 'ms';
+                
+                log('RES', `Gemini Respondeu (${duration})`, data);
+                addChatMessage('model', data.response);
+
+            } catch (error) {
+                log('ERR', 'Falha no Chat', error.message);
+                addChatMessage('system', 'Erro de conexão no chat.');
+            } finally {
+                document.getElementById('chat-status').innerText = "● READY";
+                document.getElementById('chat-status').className = "text-green-500";
+            }
+        }
+
+        function addChatMessage(role, text) {
+            const div = document.getElementById('chat-history');
+            const msg = document.createElement('div');
+            
+            if(role === 'user') {
+                msg.className = "text-right";
+                msg.innerHTML = `<span class="bg-blue-900/50 text-blue-200 px-2 py-1 rounded inline-block border border-blue-800">${text}</span>`;
+                chatHistory.push({role: 'user', text});
+            } else if (role === 'model') {
+                msg.className = "text-left";
+                // Renderiza quebras de linha
+                const formatted = text.replace(/\n/g, '<br>');
+                msg.innerHTML = `<span class="text-slate-300">${formatted}</span>`;
+                chatHistory.push({role: 'model', text});
+            } else { // System messages
+                msg.className = "text-center text-xs text-slate-500 py-2";
+                msg.innerText = `[SYSTEM] ${text}`;
+            }
+            
+            div.appendChild(msg);
+            div.scrollTop = div.scrollHeight;
+        }
+
+        // --- DRAWING ---
+        function drawFindings(findings) {
+            const canvas = document.getElementById('overlay-canvas');
+            const img = document.getElementById('radiograph-img');
+            
+            // Garantir que a imagem carregou
+            if(img.width === 0) return;
+
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            
+            const scaleX = img.width / img.naturalWidth;
+            const scaleY = img.height / img.naturalHeight;
+
+            findings.forEach(f => {
+                const isCarie = f.label.toLowerCase().includes('carie');
+                ctx.strokeStyle = isCarie ? '#f87171' : '#4ade80';
+                ctx.fillStyle = isCarie ? 'rgba(248, 113, 113, 0.15)' : 'rgba(74, 222, 128, 0.15)';
+                ctx.lineWidth = 2;
+
+                if(f.segmentation && f.segmentation.length) {
+                    ctx.beginPath();
+                    f.segmentation.forEach((pt, i) => {
+                        const x = pt[0] * scaleX;
+                        const y = pt[1] * scaleY;
+                        i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+                    });
+                    ctx.closePath();
+                    ctx.stroke();
+                    ctx.fill();
+                } else if(f.bbox) {
+                    const [x1, y1, x2, y2] = f.bbox;
+                    ctx.strokeRect(x1*scaleX, y1*scaleY, (x2-x1)*scaleX, (y2-y1)*scaleY);
+                    ctx.fillRect(x1*scaleX, y1*scaleY, (x2-x1)*scaleX, (y2-y1)*scaleY);
+                }
+            });
+        }
+        
+        // Redraw on resize
+        window.addEventListener('resize', () => {
+             if(lastFindingsRaw && lastFindingsRaw.findings) drawFindings(lastFindingsRaw.findings);
+        });
+    </script>
+</body>
+</html>

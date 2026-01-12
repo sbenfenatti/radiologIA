@@ -61,9 +61,37 @@ export default function PresentationPage() {
     const profileLabel = isVisitor ? 'Perfil (Visitante)' : 'Perfil';
 
     useEffect(() => {
-        const tokenAccess = localStorage.getItem('tokenAuth') === '1';
-        setHasTokenAccess(tokenAccess);
-        setTokenChecked(true);
+        let isActive = true;
+        const verifyTokenAccess = async () => {
+            try {
+                const response = await fetch('/api/token-session', {
+                    method: 'GET',
+                    cache: 'no-store',
+                });
+                if (!isActive) {
+                    return;
+                }
+                if (!response.ok) {
+                    localStorage.removeItem('tokenAuth');
+                    setHasTokenAccess(false);
+                    return;
+                }
+                setHasTokenAccess(true);
+            } catch (error) {
+                console.error(error);
+                if (isActive) {
+                    setHasTokenAccess(false);
+                }
+            } finally {
+                if (isActive) {
+                    setTokenChecked(true);
+                }
+            }
+        };
+        verifyTokenAccess();
+        return () => {
+            isActive = false;
+        };
     }, []);
 
     useEffect(() => {
@@ -105,6 +133,11 @@ export default function PresentationPage() {
         } catch (error) {
             console.error(error);
         } finally {
+            try {
+                await fetch('/api/token-session', { method: 'DELETE' });
+            } catch (error) {
+                console.error(error);
+            }
             localStorage.removeItem('tokenAuth');
             router.push('/');
         }
@@ -120,21 +153,15 @@ export default function PresentationPage() {
 
     return (
         <div className="min-h-screen flex flex-col items-center justify-start px-6 pb-24 pt-12 antialiased relative overflow-hidden transition-colors duration-500 text-gray-900 dark:text-gray-100 bg-background">
-            <div className="absolute inset-0 w-full h-full overflow-hidden z-0 pointer-events-none">
+            <div className="absolute inset-0 w-full h-full overflow-hidden z-0 pointer-events-none flag-stage">
                 <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 brightness-100 contrast-150 mix-blend-overlay"></div>
-                <div
-                    className="flag-shape flag-green opacity-60 dark:opacity-35"
-                    style={{ animationDuration: '12s' }}
-                ></div>
-                <div
-                    className="flag-shape flag-yellow opacity-55 dark:opacity-30"
-                    style={{ animationDuration: '14s' }}
-                ></div>
-                <div
-                    className="flag-shape flag-blue opacity-55 dark:opacity-35"
-                    style={{ animationDuration: '16s' }}
-                ></div>
-                <div className="flag-glow"></div>
+                <div className="flag-canvas">
+                    <div className="flag-shape flag-green"></div>
+                    <div className="flag-shape flag-yellow"></div>
+                    <div className="flag-shape flag-blue"></div>
+                    <div className="flag-glow"></div>
+                </div>
+                <div className="flag-glass"></div>
             </div>
 
             <header className="absolute right-6 top-6 z-10 flex flex-wrap items-center gap-3">
@@ -207,14 +234,14 @@ export default function PresentationPage() {
                 />
             </div>
 
-            <motion.div 
+            <motion.div
                 initial={{ opacity: 0, y: 20 }} 
                 animate={{ opacity: 1, y: 0 }} 
                 transition={{ duration: 0.8, delay: 0.4 }}
                 className="absolute z-10"
                 style={toStyle(layout.cardTriagem)}
             >
-                <Link href="#" className="block group h-full">
+                <Link href="/triagem" className="block group h-full">
                     <GlassCard className="h-full hover:border-brand-green/50 hover:-translate-y-2 transition-transform duration-300 ease-in-out">
                         <div className="flex flex-col items-center text-center p-6">
                             <div className="p-4 bg-brand-green/10 rounded-full border border-brand-green/20 mb-4">
@@ -227,14 +254,14 @@ export default function PresentationPage() {
                 </Link>
             </motion.div>
 
-            <motion.div 
+            <motion.div
                 initial={{ opacity: 0, y: 20 }} 
                 animate={{ opacity: 1, y: 0 }} 
                 transition={{ duration: 0.8, delay: 0.5 }}
                 className="absolute z-10"
                 style={toStyle(layout.cardAuxiliar)}
             >
-                <Link href="#" className="block group h-full">
+                <Link href="/auxiliar" className="block group h-full">
                     <GlassCard className="h-full hover:border-brand-yellow/50 hover:-translate-y-2 transition-transform duration-300 ease-in-out">
                         <div className="flex flex-col items-center text-center p-6">
                             <div className="p-4 bg-brand-yellow/10 rounded-full border border-brand-yellow/20 mb-4">

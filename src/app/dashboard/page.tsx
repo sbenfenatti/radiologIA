@@ -42,11 +42,13 @@ const layout = {
     },
 };
 
+const ARTBOARD = { width: 1600, height: 900 };
+
 const toStyle = (rect: { x: number; y: number; w: number; h: number }) => ({
-    left: `${rect.x}px`,
-    top: `${rect.y}px`,
-    width: `${rect.w}px`,
-    height: `${rect.h}px`,
+    left: `${(rect.x / ARTBOARD.width) * 100}%`,
+    top: `${(rect.y / ARTBOARD.height) * 100}%`,
+    width: `${(rect.w / ARTBOARD.width) * 100}%`,
+    height: `${(rect.h / ARTBOARD.height) * 100}%`,
 });
 
 export default function PresentationPage() {
@@ -214,65 +216,67 @@ export default function PresentationPage() {
                 </Popover>
             </header>
 
-            <div className="absolute z-10" style={toStyle(layout.logo)}>
-                <div className="relative flex items-center justify-center w-full h-full">
-                    <img 
-                        src="https://i.ibb.co/9HFVnY4x/Gemini-Generated-Image-oc1jgfoc1jgfoc1j-Photoroom.png"
-                        alt="Logo RadiologIA"
-                        className="relative w-full h-full object-contain drop-shadow-xl"
+            <div className="relative z-10 w-full max-w-[1600px] aspect-[16/9] mx-auto">
+                <div className="absolute z-10" style={toStyle(layout.logo)}>
+                    <div className="relative flex items-center justify-center w-full h-full">
+                        <img 
+                            src="https://i.ibb.co/9HFVnY4x/Gemini-Generated-Image-oc1jgfoc1jgfoc1j-Photoroom.png"
+                            alt="Logo RadiologIA"
+                            className="relative w-full h-full object-contain drop-shadow-xl"
+                        />
+                    </div>
+                </div>
+
+                <div className="absolute z-10" style={toStyle(layout.wordmark)}>
+                    <img
+                        src={isDarkMode
+                            ? "https://i.ibb.co/yBWfdYwN/Captura-de-Tela-2026-01-08-s-13-17-59-removebg-preview.png"
+                            : "https://i.ibb.co/B5Lsvm4M/Captura-de-Tela-2026-01-08-s-12-59-47-removebg-preview.png"}
+                        alt="radiologIA"
+                        className="w-full h-full object-contain drop-shadow-sm"
                     />
                 </div>
-            </div>
 
-            <div className="absolute z-10" style={toStyle(layout.wordmark)}>
-                <img
-                    src={isDarkMode
-                        ? "https://i.ibb.co/yBWfdYwN/Captura-de-Tela-2026-01-08-s-13-17-59-removebg-preview.png"
-                        : "https://i.ibb.co/B5Lsvm4M/Captura-de-Tela-2026-01-08-s-12-59-47-removebg-preview.png"}
-                    alt="radiologIA"
-                    className="w-full h-full object-contain drop-shadow-sm"
-                />
-            </div>
-
-            <motion.div
-                initial={{ opacity: 0, y: 20 }} 
-                animate={{ opacity: 1, y: 0 }} 
-                transition={{ duration: 0.8, delay: 0.4 }}
-                className="absolute z-10"
-                style={toStyle(layout.cardTriagem)}
-            >
-                <Link href="/triagem" className="block group h-full">
-                    <GlassCard className="h-full hover:border-brand-green/50 hover:-translate-y-2 transition-transform duration-300 ease-in-out">
-                        <div className="flex flex-col items-center text-center p-6">
-                            <div className="p-4 bg-brand-green/10 rounded-full border border-brand-green/20 mb-4">
-                                <ScanSearch className="w-11 h-11 text-brand-green"/>
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }} 
+                    animate={{ opacity: 1, y: 0 }} 
+                    transition={{ duration: 0.8, delay: 0.4 }}
+                    className="absolute z-10"
+                    style={toStyle(layout.cardTriagem)}
+                >
+                    <Link href="/triagem" className="block group h-full">
+                        <GlassCard className="h-full hover:border-brand-green/50 hover:-translate-y-2 transition-transform duration-300 ease-in-out">
+                            <div className="flex flex-col items-center text-center p-6">
+                                <div className="p-4 bg-brand-green/10 rounded-full border border-brand-green/20 mb-4">
+                                    <ScanSearch className="w-11 h-11 text-brand-green"/>
+                                </div>
+                                <h2 className="text-2xl font-bold mb-2 text-brand-blue dark:text-white">Triagem</h2>
+                                <p className="text-slate-600 dark:text-gray-300 text-sm">Envie exames para análise inicial e priorização automática.</p>
                             </div>
-                            <h2 className="text-2xl font-bold mb-2 text-brand-blue dark:text-white">Triagem</h2>
-                            <p className="text-slate-600 dark:text-gray-300 text-sm">Envie exames para análise inicial e priorização automática.</p>
-                        </div>
-                    </GlassCard>
-                </Link>
-            </motion.div>
+                        </GlassCard>
+                    </Link>
+                </motion.div>
 
-            <motion.div
-                initial={{ opacity: 0, y: 20 }} 
-                animate={{ opacity: 1, y: 0 }} 
-                transition={{ duration: 0.8, delay: 0.5 }}
-                className="absolute z-10"
-                style={toStyle(layout.cardAuxiliar)}
-            >
-                <Link href="/auxiliar" className="block group h-full">
-                    <GlassCard className="h-full hover:border-brand-yellow/50 hover:-translate-y-2 transition-transform duration-300 ease-in-out">
-                        <div className="flex flex-col items-center text-center p-6">
-                            <div className="p-4 bg-brand-yellow/10 rounded-full border border-brand-yellow/20 mb-4">
-                                <BrainCircuit className="w-11 h-11 text-brand-yellow"/>
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }} 
+                    animate={{ opacity: 1, y: 0 }} 
+                    transition={{ duration: 0.8, delay: 0.5 }}
+                    className="absolute z-10"
+                    style={toStyle(layout.cardAuxiliar)}
+                >
+                    <Link href="/auxiliar" className="block group h-full">
+                        <GlassCard className="h-full hover:border-brand-yellow/50 hover:-translate-y-2 transition-transform duration-300 ease-in-out">
+                            <div className="flex flex-col items-center text-center p-6">
+                                <div className="p-4 bg-brand-yellow/10 rounded-full border border-brand-yellow/20 mb-4">
+                                    <BrainCircuit className="w-11 h-11 text-brand-yellow"/>
+                                </div>
+                                <h2 className="text-2xl font-bold mb-2 text-brand-blue dark:text-white">Auxiliar Diagnóstico</h2>
+                                <p className="text-slate-600 dark:text-gray-300 text-sm">Aprofunde a análise com contexto clínico e histórico.</p>
                             </div>
-                            <h2 className="text-2xl font-bold mb-2 text-brand-blue dark:text-white">Auxiliar Diagnóstico</h2>
-                            <p className="text-slate-600 dark:text-gray-300 text-sm">Aprofunde a análise com contexto clínico e histórico.</p>
-                        </div>
-                    </GlassCard>
-                </Link>
-            </motion.div>
+                        </GlassCard>
+                    </Link>
+                </motion.div>
+            </div>
         </div>
     );
 }

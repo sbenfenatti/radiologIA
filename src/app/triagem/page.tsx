@@ -3,8 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
-  BarChart3,
-  CheckCircle2,
   FileSearch,
   Filter,
   LogOut,
@@ -250,6 +248,14 @@ const TOOTH_GROUP_LABELS: Record<string, string> = {
   terceiro_molar: '3º molares',
   outros: 'Outros',
 };
+
+const AGE_BUCKETS = [
+  { label: '18-25', min: 18, max: 25 },
+  { label: '26-35', min: 26, max: 35 },
+  { label: '36-45', min: 36, max: 45 },
+  { label: '46-55', min: 46, max: 55 },
+  { label: '56+', min: 56, max: null },
+];
 
 const SEVERITY_RULES = [
   {
@@ -729,28 +735,11 @@ const scoreSeverity = (score: number) => {
   return 'Baixa';
 };
 
-const toPercent = (value: number, max: number) => {
-  if (max <= 0) {
+const percentOf = (value: number, total: number) => {
+  if (total <= 0) {
     return 0;
   }
-  return Math.round((value / max) * 100);
-};
-
-const getFindingStyle = (finding: Finding) => {
-  const label = (finding.canonicalLabel ?? finding.label).toLowerCase();
-  if (finding.category === 'pathology' || label.includes('carie') || label.includes('lesao')) {
-    return { stroke: '#f87171', fill: 'rgba(248, 113, 113, 0.2)' };
-  }
-  if (finding.category === 'treatment') {
-    return { stroke: '#fbbf24', fill: 'rgba(251, 191, 36, 0.2)' };
-  }
-  if (finding.category === 'structure') {
-    return { stroke: '#38bdf8', fill: 'rgba(56, 189, 248, 0.18)' };
-  }
-  if (finding.category === 'tooth') {
-    return { stroke: '#4ade80', fill: 'rgba(74, 222, 128, 0.2)' };
-  }
-  return { stroke: '#94a3b8', fill: 'rgba(148, 163, 184, 0.2)' };
+  return Math.round((value / total) * 100);
 };
 
 const getSourceKind = (finding: Finding) => {
@@ -762,16 +751,6 @@ const getSourceKind = (finding: Finding) => {
     return 'detectron';
   }
   return 'other';
-};
-
-const formatModelType = (value: ModelType) => {
-  if (value === 'combined') {
-    return 'Combinado';
-  }
-  if (value === 'mask_rcnn') {
-    return 'Mask R-CNN';
-  }
-  return 'YOLOv11';
 };
 
 export default function TriagemPage() {
@@ -787,29 +766,16 @@ export default function TriagemPage() {
   const [isBatchAnalyzing, setIsBatchAnalyzing] = useState(false);
   const [batchError, setBatchError] = useState<string | null>(null);
   const [batchProgress, setBatchProgress] = useState({ completed: 0, total: 0 });
-  const [summary, setSummary] = useState('');
-  const [summaryError, setSummaryError] = useState<string | null>(null);
-  const [isSummaryLoading, setIsSummaryLoading] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
-  const [isSampleLoading, setIsSampleLoading] = useState(false);
   const [isAutoBatchLoading, setIsAutoBatchLoading] = useState(false);
   const [uploadPassword, setUploadPassword] = useState('');
-  const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
-  const [isPreviewReady, setIsPreviewReady] = useState(false);
-  const [showDetectron, setShowDetectron] = useState(true);
-  const [showYolo, setShowYolo] = useState(true);
-  const [showOther, setShowOther] = useState(true);
-  const [showOverlayLabels, setShowOverlayLabels] = useState(true);
   const casesRef = useRef<TriageCase[]>([]);
   const imageMapRef = useRef<string[]>([]);
-  const previewImageRef = useRef<HTMLImageElement | null>(null);
-  const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const isVisitor = hasTokenAccess && !user;
   const displayName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Usuario';
   const profileHref = isVisitor ? '/perfil/visitante' : '/perfil';
   const profileLabel = isVisitor ? 'Perfil (Visitante)' : 'Perfil';
   const baseApiUrl = process.env.NEXT_PUBLIC_MODAL_API_URL ?? '';
-  const sampleUrl = process.env.NEXT_PUBLIC_TRIAGEM_SAMPLE_URL ?? '/triagem_sample.json';
   const autoBatchUrl =
     process.env.NEXT_PUBLIC_TRIAGEM_BATCH_URL ?? '/batch_test/triagem_batch_results.json';
   const autoBatchImageBase =
@@ -1023,22 +989,6 @@ export default function TriagemPage() {
     });
   }, [cases, hideAnatomy, normalizeToothLabel]);
 
-  const selectedCase = useMemo(
-    () => casesWithInsights.find((caseItem) => caseItem.id === selectedCaseId) ?? null,
-    [casesWithInsights, selectedCaseId],
-  );
-  const selectedClinicalProfile = useMemo(() => selectedCase?.clinicalProfile ?? null, [selectedCase]);
-
-  useEffect(() => {
-    if (!selectedCase && casesWithInsights.length > 0) {
-      setSelectedCaseId(casesWithInsights[0].id);
-    }
-  }, [casesWithInsights, selectedCase]);
-
-  useEffect(() => {
-    setIsPreviewReady(false);
-  }, [selectedCase?.previewUrl]);
-
   const totals = useMemo(() => {
     const analyzed = casesWithInsights.filter((caseItem) => caseItem.status === 'done');
     const pathologyCounts = new Map<string, number>();
@@ -1097,6 +1047,52 @@ export default function TriagemPage() {
     };
   }, [casesWithInsights]);
 
+  const batchSummary = useMemo(() => {
+    const genderCounts: Record<ClinicalProfile['gender'], number> = {
+      Feminino: 0,
+      Masculino: 0,
+      Outros: 0,
+    };
+    const pathologyLabels = new Set<string>();
+    const complaintCounts = new Map<string, number>();
+    const ageBuckets = AGE_BUCKETS.map((bucket) => ({ ...bucket, count: 0 }));
+
+    casesWithInsights.forEach((caseItem) => {
+      const gender = caseItem.clinicalProfile?.gender ?? 'Outros';
+      genderCounts[gender] += 1;
+      caseItem.insights.normalizedFindings.forEach((finding) => {
+        if (finding.category === 'pathology') {
+          pathologyLabels.add(finding.displayLabel ?? finding.label);
+        }
+      });
+      const complaint = caseItem.clinicalProfile?.complaint?.trim();
+      if (complaint) {
+        complaintCounts.set(complaint, (complaintCounts.get(complaint) ?? 0) + 1);
+      }
+      const age = caseItem.clinicalProfile?.age;
+      if (typeof age === 'number') {
+        const bucket = ageBuckets.find(
+          (entry) => age >= entry.min && (entry.max == null || age <= entry.max),
+        );
+        if (bucket) {
+          bucket.count += 1;
+        }
+      }
+    });
+
+    const topComplaints = Array.from(complaintCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 4);
+
+    return {
+      totalCases: casesWithInsights.length,
+      genderCounts,
+      pathologyCount: pathologyLabels.size,
+      ageBuckets,
+      topComplaints,
+    };
+  }, [casesWithInsights]);
+
   const priorityCases = useMemo(() => {
     const order = { Alta: 3, Media: 2, Baixa: 1, Aguardando: 0 };
     return casesWithInsights
@@ -1111,34 +1107,22 @@ export default function TriagemPage() {
       .slice(0, 8);
   }, [casesWithInsights]);
 
-  const summaryContext = useMemo(() => {
-    if (totals.analyzed.length === 0) {
-      return '';
-    }
-    const needsText = totals.topNeeds.length
-      ? totals.topNeeds.map(([need, count]) => `${need}: ${count}`).join(', ')
-      : 'Sem necessidades definidas';
-    const findingsText = totals.topLabels.length
-      ? totals.topLabels.map(([label, count]) => `${label} (${count})`).join(', ')
-      : 'Sem achados relevantes';
-    const toothText = Array.from(totals.toothGroupCounts.entries())
-      .map(([group, count]) => `${TOOTH_GROUP_LABELS[group] ?? group}: ${count}`)
-      .join(', ');
-    const missingText = Object.entries(totals.missingCounts)
-      .map(([group, count]) => `${TOOTH_GROUP_LABELS[group] ?? group}: ${count}`)
-      .join(', ');
-    return [
-      `Total de casos analisados: ${totals.analyzed.length}`,
-      `Achados relevantes (sem estruturas): ${totals.totalFindings}`,
-      `Severidade alta: ${totals.severityCounts.Alta}`,
-      `Severidade media: ${totals.severityCounts.Media}`,
-      `Severidade baixa: ${totals.severityCounts.Baixa}`,
-      `Dentição detectada: ${toothText || 'Sem dados'}`,
-      `Estimativa de ausentes: ${missingText || 'Sem dados'}`,
-      `Necessidades mais comuns: ${needsText}`,
-      `Top achados: ${findingsText}`,
-    ].join('\n');
-  }, [totals]);
+  const severityTotal =
+    totals.severityCounts.Alta + totals.severityCounts.Media + totals.severityCounts.Baixa;
+  const topLabelMax = totals.topLabels.reduce((max, [, count]) => Math.max(max, count), 1);
+  const topNeedMax = totals.topNeeds.reduce((max, [, count]) => Math.max(max, count), 1);
+  const missingMax = Object.values(totals.missingCounts).reduce(
+    (max, count) => Math.max(max, count),
+    1,
+  );
+  const ageBucketMax = batchSummary.ageBuckets.reduce(
+    (max, bucket) => Math.max(max, bucket.count),
+    1,
+  );
+  const complaintMax = batchSummary.topComplaints.reduce(
+    (max, [, count]) => Math.max(max, count),
+    1,
+  );
 
   const handleFileSelection = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
@@ -1158,8 +1142,6 @@ export default function TriagemPage() {
     setCases((prev) => [...prev, ...nextCases]);
     setBatchError(null);
     setImportError(null);
-    setSummary('');
-    setSummaryError(null);
     event.target.value = '';
   };
 
@@ -1185,84 +1167,6 @@ export default function TriagemPage() {
     });
     setBatchError(null);
     setImportError(null);
-    setSummary('');
-    setSummaryError(null);
-  };
-
-  const handleJsonImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) {
-      return;
-    }
-    setImportError(null);
-    try {
-      const text = await file.text();
-      const payload = JSON.parse(text) as unknown;
-      ingestJsonPayload(payload);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Falha ao importar JSON.';
-      setImportError(message);
-    } finally {
-      event.target.value = '';
-    }
-  };
-
-  const handleImageMapping = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files ?? []);
-    if (files.length === 0) {
-      return;
-    }
-    const targetNames = new Set(
-      cases
-        .filter((caseItem) => !caseItem.previewUrl)
-        .map((caseItem) => caseItem.name.toLowerCase()),
-    );
-    if (targetNames.size === 0) {
-      event.target.value = '';
-      return;
-    }
-
-    const urlMap = new Map<string, string>();
-    files.forEach((file) => {
-      const key = file.name.toLowerCase();
-      if (!targetNames.has(key)) {
-        return;
-      }
-      const url = URL.createObjectURL(file);
-      imageMapRef.current.push(url);
-      urlMap.set(key, url);
-    });
-
-    if (urlMap.size > 0) {
-      setCases((prev) =>
-        prev.map((caseItem) => {
-          if (caseItem.previewUrl) {
-            return caseItem;
-          }
-          const url = urlMap.get(caseItem.name.toLowerCase());
-          return url ? { ...caseItem, previewUrl: url } : caseItem;
-        }),
-      );
-    }
-    event.target.value = '';
-  };
-
-  const handleSampleImport = async () => {
-    setImportError(null);
-    setIsSampleLoading(true);
-    try {
-      const response = await fetch(sampleUrl, { cache: 'no-store' });
-      if (!response.ok) {
-        throw new Error('Nao foi possivel carregar o JSON local.');
-      }
-      const payload = await response.json();
-      ingestJsonPayload(payload);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Falha ao carregar JSON local.';
-      setImportError(message);
-    } finally {
-      setIsSampleLoading(false);
-    }
   };
 
   const handleAutoBatchImport = async () => {
@@ -1302,9 +1206,6 @@ export default function TriagemPage() {
     imageMapRef.current = [];
     setBatchError(null);
     setImportError(null);
-    setSummary('');
-    setSummaryError(null);
-    setSelectedCaseId(null);
   };
 
   const analyzeCase = async (caseItem: TriageCase) => {
@@ -1415,158 +1316,6 @@ export default function TriagemPage() {
     router.push(`/triagem/caso/${caseItem.caseNumber}`);
   };
 
-  const handleGenerateSummary = async () => {
-    if (!summaryContext) {
-      setSummaryError('Analise ao menos um caso para gerar o resumo.');
-      return;
-    }
-    setSummary('');
-    setSummaryError(null);
-    setIsSummaryLoading(true);
-    try {
-      const payload = {
-        context: summaryContext,
-        history: [
-          {
-            role: 'user',
-            text: 'Gere um resumo epidemiologico curto com prioridades clinicas, riscos e recomendacoes.',
-          },
-        ],
-      };
-      const response = await fetch('/api/gemini', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (!response.ok) {
-        let errorMessage = 'Falha ao gerar resumo.';
-        try {
-          const data = await response.json();
-          if (typeof data?.error === 'string' && data.error.trim()) {
-            errorMessage = data.error;
-          }
-        } catch (error) {
-          const text = await response.text();
-          if (text) {
-            errorMessage = text;
-          }
-        }
-        throw new Error(errorMessage);
-      }
-      const data = await response.json();
-      setSummary(data.response || 'Resumo indisponivel.');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Falha ao gerar resumo.';
-      setSummaryError(message);
-    } finally {
-      setIsSummaryLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    const canvas = previewCanvasRef.current;
-    const img = previewImageRef.current;
-    if (!canvas || !img || !selectedCase || !isPreviewReady) {
-      return;
-    }
-
-    const drawFindings = () => {
-      const displayWidth = img.clientWidth;
-      const displayHeight = img.clientHeight;
-      if (displayWidth === 0 || displayHeight === 0) {
-        return;
-      }
-      canvas.width = displayWidth;
-      canvas.height = displayHeight;
-
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        return;
-      }
-      ctx.clearRect(0, 0, displayWidth, displayHeight);
-
-      const scaleX = displayWidth / (img.naturalWidth || displayWidth);
-      const scaleY = displayHeight / (img.naturalHeight || displayHeight);
-      const visibleFindings = selectedCase.insights.visibleFindings.filter((finding) => {
-        const kind = getSourceKind(finding);
-        if (kind === 'yolo') {
-          return showYolo;
-        }
-        if (kind === 'detectron') {
-          return showDetectron;
-        }
-        return showOther;
-      });
-
-      visibleFindings.forEach((finding) => {
-        const style = getFindingStyle(finding);
-        ctx.strokeStyle = style.stroke;
-        ctx.fillStyle = style.fill;
-        ctx.lineWidth = 2;
-
-        if (finding.segmentation?.length) {
-          ctx.beginPath();
-          finding.segmentation.forEach((point, index) => {
-            const x = point[0] * scaleX;
-            const y = point[1] * scaleY;
-            if (index === 0) {
-              ctx.moveTo(x, y);
-            } else {
-              ctx.lineTo(x, y);
-            }
-          });
-          ctx.closePath();
-          ctx.stroke();
-          ctx.fill();
-        } else if (finding.bbox?.length === 4) {
-          const [x1, y1, x2, y2] = finding.bbox;
-          const width = (x2 - x1) * scaleX;
-          const height = (y2 - y1) * scaleY;
-          ctx.strokeRect(x1 * scaleX, y1 * scaleY, width, height);
-          ctx.fillRect(x1 * scaleX, y1 * scaleY, width, height);
-        }
-
-        if (showOverlayLabels) {
-          let labelX = 8;
-          let labelY = 14;
-          if (finding.bbox?.length === 4) {
-            const [x1, y1] = finding.bbox;
-            labelX = x1 * scaleX + 4;
-            labelY = y1 * scaleY + 14;
-          } else if (finding.segmentation?.length) {
-            const [x, y] = finding.segmentation[0];
-            labelX = x * scaleX + 4;
-            labelY = y * scaleY + 14;
-          }
-
-          const sourceKind = getSourceKind(finding);
-          const sourceShort = sourceKind === 'detectron' ? 'D' : sourceKind === 'yolo' ? 'Y' : 'O';
-          const toothText = finding.toothId != null
-            ? `·${finding.toothId}`
-            : finding.toothType
-              ? `·${formatToothTag(finding.toothType)}`
-              : '';
-          const displayLabel = finding.displayLabel ?? finding.label;
-          const labelText = `${displayLabel}${toothText}·${sourceShort}`;
-
-          ctx.font = '11px ui-sans-serif, system-ui, -apple-system, sans-serif';
-          const metrics = ctx.measureText(labelText);
-          const padding = 3;
-          const textWidth = metrics.width + padding * 2;
-          const textHeight = 14;
-          ctx.fillStyle = 'rgba(15, 23, 42, 0.65)';
-          ctx.fillRect(labelX, labelY - textHeight, textWidth, textHeight);
-          ctx.fillStyle = '#f8fafc';
-          ctx.fillText(labelText, labelX + padding, labelY - 3);
-        }
-      });
-    };
-
-    drawFindings();
-    const handleResize = () => drawFindings();
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, [selectedCase, isPreviewReady, hideAnatomy, normalizeToothLabel, showDetectron, showYolo, showOther, showOverlayLabels]);
 
   if (isLoading || !tokenChecked) {
     return (
@@ -1655,108 +1404,123 @@ export default function TriagemPage() {
           src="https://i.ibb.co/9HFVnY4x/Gemini-Generated-Image-oc1jgfoc1jgfoc1j-Photoroom.png"
           alt=""
           aria-hidden="true"
-          className="w-[70vw] max-w-5xl opacity-90"
+          className="w-[70vw] max-w-5xl opacity-70 blur-md"
         />
       </div>
 
       <main className="relative z-10 min-h-screen pt-28 px-4 pb-10">
-        <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-          <section className="rounded-3xl border border-white/20 dark:border-white/10 bg-white/50 dark:bg-white/5 backdrop-blur-xl p-6 shadow-xl">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="mx-auto w-full max-w-6xl space-y-6">
+          <div className="px-2">
+            <p className="text-xs uppercase tracking-[0.3em] text-brand-blue/60 dark:text-white/60">
+              Triagem
+            </p>
+            <h1 className="mt-2 text-2xl font-semibold text-brand-blue dark:text-white">
+              Triagem epidemiológica
+            </h1>
+            <p className="mt-1 text-sm text-slate-600 dark:text-slate-300 max-w-2xl">
+              Carregue lotes, priorize casos e acompanhe indicadores.
+            </p>
+          </div>
+
+          <section className="rounded-3xl border border-white/20 dark:border-white/10 bg-white/45 dark:bg-white/5 backdrop-blur-xl p-6 shadow-xl">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <p className="text-xs uppercase tracking-[0.3em] text-brand-blue/60 dark:text-white/60">
-                  Triagem Epidemiológica
+                <h2 className="text-sm font-semibold uppercase tracking-wider text-brand-blue dark:text-white">
+                  Lote
+                </h2>
+                <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                  Use o lote local ou envie novas radiografias.
                 </p>
-                <h1 className="mt-2 text-2xl font-semibold text-brand-blue dark:text-white">
-                  Panorama clínico para priorizar comunidades remotas
-                </h1>
-                <p className="mt-2 text-sm text-slate-600 dark:text-slate-300 max-w-2xl">
-                  Carregue grandes lotes de radiografias, identifique necessidades críticas e gere
-                  uma fila de prioridade baseada em gravidade.
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={clearBatch}
-                  className="rounded-full border border-brand-blue/30 dark:border-white/20 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-brand-blue dark:text-white hover:bg-white/40 dark:hover:bg-white/10 transition-all"
-                >
-                  Limpar
-                </button>
               </div>
             </div>
-          </section>
 
-          <div className="grid gap-6 xl:grid-cols-[1.05fr_1.5fr]">
-            <section className="rounded-3xl border border-white/20 dark:border-white/10 bg-white/45 dark:bg-white/5 backdrop-blur-xl p-6 shadow-xl">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-sm font-semibold uppercase tracking-wider text-brand-blue dark:text-white">
-                    Entrada do lote
-                  </h2>
-                  <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
-                    Adicione radiografias e acompanhe o processamento.
-                  </p>
+            <div className="mt-4 space-y-4">
+              {casesWithInsights.length === 0 ? (
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <div className="rounded-2xl border border-white/30 dark:border-white/10 bg-white/40 dark:bg-white/5 p-5">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-brand-blue dark:text-white">
+                      Lote local
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      50 radiografias analisadas para demonstração rápida.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleAutoBatchImport}
+                      disabled={isAutoBatchLoading}
+                      className="mt-4 inline-flex items-center gap-2 rounded-full bg-brand-green px-4 py-2 text-xs font-semibold text-white shadow-md transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      {isAutoBatchLoading ? 'Carregando lote 50...' : 'Usar lote 50'}
+                    </button>
+                  </div>
+
+                  <div className="rounded-2xl border border-white/30 dark:border-white/10 bg-white/40 dark:bg-white/5 p-5">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-brand-blue dark:text-white">
+                      Upload protegido
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      Insira a senha e adicione radiografias ao lote.
+                    </p>
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setHideAnatomy((prev) => !prev);
-                  }}
-                  className="flex items-center gap-2 rounded-full border border-brand-blue/30 dark:border-white/20 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-brand-blue dark:text-white hover:bg-white/40 dark:hover:bg-white/10 transition-all"
-                >
-                  <Filter className="h-3 w-3" />
-                  {hideAnatomy ? 'Ocultando estruturas' : 'Mostrando estruturas'}
-                </button>
-              </div>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-2xl border border-white/30 dark:border-white/10 bg-white/40 dark:bg-white/5 p-4">
+                    <p className="text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Radiografias
+                    </p>
+                    <p className="mt-2 text-2xl font-semibold text-brand-blue dark:text-white">
+                      {batchSummary.totalCases}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-white/30 dark:border-white/10 bg-white/40 dark:bg-white/5 p-4">
+                    <p className="text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Perfil do lote
+                    </p>
+                    <p className="mt-2 text-sm font-semibold text-brand-blue dark:text-white">
+                      {batchSummary.genderCounts.Feminino} mulheres · {batchSummary.genderCounts.Masculino} homens ·{' '}
+                      {batchSummary.genderCounts.Outros} outros
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-white/30 dark:border-white/10 bg-white/40 dark:bg-white/5 p-4">
+                    <p className="text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Possíveis patologias
+                    </p>
+                    <p className="mt-2 text-2xl font-semibold text-brand-blue dark:text-white">
+                      {totals.analyzed.length === 0 ? '—' : batchSummary.pathologyCount}
+                    </p>
+                    <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                      {totals.analyzed.length === 0 ? 'Aguardando análise' : 'Tipos detectados no lote'}
+                    </p>
+                  </div>
+                </div>
+              )}
 
-              <div className="mt-4 rounded-2xl border border-dashed border-white/30 dark:border-white/15 bg-white/40 dark:bg-white/5 p-6 text-center">
-                <UploadCloud className="mx-auto h-7 w-7 text-brand-blue/60 dark:text-white/60" />
-                <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
-                  Este modo roda apenas o lote já analisado (50 radiografias).
-                </p>
-                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                  Os dados foram gerados pelos mesmos modelos para evitar uso desnecessário de GPU.
-                </p>
-                <button
-                  type="button"
-                  onClick={handleAutoBatchImport}
-                  disabled={isAutoBatchLoading}
-                  className="mt-4 inline-flex items-center gap-2 rounded-full bg-brand-green px-4 py-2 text-xs font-semibold text-white shadow-md transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-                >
-                  <BarChart3 className="h-4 w-4" />
-                  {isAutoBatchLoading ? 'Carregando lote 50...' : 'Usar lote 50 (local)'}
-                </button>
-              </div>
-
-              <div className="mt-4 rounded-2xl border border-white/30 dark:border-white/10 bg-white/40 dark:bg-white/5 p-5 text-left">
-                <p className="text-xs font-semibold uppercase tracking-wider text-brand-blue dark:text-white">
-                  Upload protegido
-                </p>
-                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                  Para evitar consumo desnecessário de GPU, digite uma senha para liberar o upload
-                  manual. Caso queira apenas visualizar, use o lote já analisado acima.
-                </p>
-                <div className="mt-3 flex flex-wrap items-center gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2">
                   <input
                     type="password"
                     value={uploadPassword}
                     onChange={(event) => setUploadPassword(event.target.value)}
                     placeholder="Senha de acesso"
-                    className="flex-1 rounded-full border border-brand-blue/30 bg-white/70 px-4 py-2 text-xs text-brand-blue shadow-sm outline-none focus:border-brand-blue/60 dark:border-white/20 dark:bg-slate-900/50 dark:text-white"
+                    className="w-40 rounded-full border border-brand-blue/30 bg-white/70 px-4 py-2 text-xs text-brand-blue shadow-sm outline-none focus:border-brand-blue/60 dark:border-white/20 dark:bg-slate-900/50 dark:text-white"
                   />
                   <span
                     className={[
                       'rounded-full px-3 py-1 text-[10px] font-semibold uppercase tracking-wider',
                       uploadAttempted
                         ? 'bg-red-200 text-red-600'
-                        : 'bg-brand-yellow/20 text-brand-blue',
+                        : uploadUnlocked
+                          ? 'bg-brand-green/20 text-brand-green'
+                          : 'bg-brand-yellow/20 text-brand-blue',
                     ].join(' ')}
                   >
-                    {uploadAttempted ? 'Senha inválida' : 'Acesso restrito'}
+                    {uploadAttempted
+                      ? 'Senha inválida'
+                      : uploadUnlocked
+                        ? 'Acesso liberado'
+                        : 'Acesso restrito'}
                   </span>
-                </div>
-                <div className="mt-3 flex flex-wrap items-center gap-2">
                   <label
                     className={[
                       'inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-semibold shadow-sm transition-all',
@@ -1766,7 +1530,7 @@ export default function TriagemPage() {
                     ].join(' ')}
                   >
                     <UploadCloud className="h-4 w-4" />
-                    Enviar radiografias
+                    Adicionar radiografias
                     <input
                       type="file"
                       accept="image/*"
@@ -1787,34 +1551,60 @@ export default function TriagemPage() {
                       : 'Analisar lote'}
                   </button>
                 </div>
-                <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
-                  Acesso protegido para evitar uso desnecessário de GPU.
+                <div className="flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  <button
+                    type="button"
+                    onClick={() => setNormalizeToothLabel((prev) => !prev)}
+                    className="rounded-full border border-brand-blue/30 dark:border-white/20 px-3 py-1 font-semibold text-brand-blue dark:text-white hover:bg-white/40 dark:hover:bg-white/10 transition-all"
+                  >
+                    {normalizeToothLabel ? 'Rótulos normalizados' : 'Rótulos originais'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={clearBatch}
+                    className="rounded-full border border-brand-blue/30 dark:border-white/20 px-3 py-1 font-semibold text-brand-blue dark:text-white hover:bg-white/40 dark:hover:bg-white/10 transition-all"
+                  >
+                    Limpar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHideAnatomy((prev) => !prev);
+                    }}
+                    className="flex items-center gap-2 rounded-full border border-brand-blue/30 dark:border-white/20 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-brand-blue dark:text-white hover:bg-white/40 dark:hover:bg-white/10 transition-all"
+                  >
+                    <Filter className="h-3 w-3" />
+                    {hideAnatomy ? 'Ocultar estruturas' : 'Mostrar estruturas'}
+                  </button>
+                  <span>{cases.length} radiografias</span>
+                  {batchError ? (
+                    <span className="text-red-500 dark:text-red-300">{batchError}</span>
+                  ) : null}
+                  {importError ? (
+                    <span className="text-red-500 dark:text-red-300">{importError}</span>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="rounded-3xl border border-white/20 dark:border-white/10 bg-white/45 dark:bg-white/5 backdrop-blur-xl p-6 shadow-xl">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold uppercase tracking-wider text-brand-blue dark:text-white">
+                  Casos
+                </h2>
+                <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                  Selecione um caso para abrir a radiografia.
                 </p>
               </div>
+              <span className="rounded-full border border-brand-blue/30 dark:border-white/20 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-brand-blue dark:text-white">
+                {casesWithInsights.length} casos
+              </span>
+            </div>
 
-              <div className="mt-4 flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                <button
-                  type="button"
-                  onClick={() => setNormalizeToothLabel((prev) => !prev)}
-                  className="rounded-full border border-brand-blue/30 dark:border-white/20 px-3 py-1 font-semibold text-brand-blue dark:text-white hover:bg-white/40 dark:hover:bg-white/10 transition-all"
-                >
-                  {normalizeToothLabel ? 'Rótulos normalizados' : 'Rótulos originais'}
-                </button>
-                <span>
-                  {cases.length} radiografias carregadas
-                </span>
-                <span className="text-slate-400 dark:text-slate-500">
-                  Lote local vinculado automaticamente.
-                </span>
-                {batchError ? (
-                  <span className="text-red-500 dark:text-red-300">{batchError}</span>
-                ) : null}
-                {importError ? (
-                  <span className="text-red-500 dark:text-red-300">{importError}</span>
-                ) : null}
-              </div>
-
-              <div className="mt-4 max-h-64 space-y-3 overflow-y-auto pr-2">
+            <div className="mt-4 rounded-2xl border border-white/30 dark:border-white/10 bg-white/40 dark:bg-white/5 p-4">
+              <div className="max-h-[480px] space-y-3 overflow-y-auto pr-2">
                 {casesWithInsights.length === 0 ? (
                   <div className="rounded-2xl border border-white/30 dark:border-white/10 bg-white/30 dark:bg-white/5 p-4 text-sm text-slate-600 dark:text-slate-300">
                     Nenhuma radiografia no lote ainda.
@@ -1823,31 +1613,18 @@ export default function TriagemPage() {
                   casesWithInsights.map((caseItem) => (
                     <div
                       key={caseItem.id}
-                      className={[
-                        'flex items-center gap-3 rounded-2xl border bg-white/30 dark:bg-white/5 p-3 transition-all cursor-pointer',
-                        selectedCaseId === caseItem.id
-                          ? 'border-brand-green/60 ring-1 ring-brand-green/30'
-                          : 'border-white/30 dark:border-white/10 hover:border-brand-blue/30',
-                      ].join(' ')}
+                      className="flex items-center gap-3 rounded-2xl border border-white/30 dark:border-white/10 bg-white/30 dark:bg-white/5 p-3 transition-all cursor-pointer hover:border-brand-blue/30"
                       onClick={() => handleOpenCase(caseItem)}
                     >
                       <div className="h-12 w-12 overflow-hidden rounded-xl bg-white/60 dark:bg-slate-900/60 flex items-center justify-center">
-                        {caseItem.previewUrl ? (
-                          <img
-                            src={caseItem.previewUrl}
-                            alt={caseItem.displayName}
-                            className="h-full w-full object-cover"
-                          />
-                        ) : (
-                          <FileSearch className="h-5 w-5 text-brand-blue/60 dark:text-white/60" />
-                        )}
+                        <FileSearch className="h-5 w-5 text-brand-blue/60 dark:text-white/60" />
                       </div>
                       <div className="flex-1">
                         <div className="flex items-start justify-between gap-2">
                           <div>
-                        <p className="text-sm font-semibold text-brand-blue dark:text-white">
-                          {caseItem.displayName}
-                        </p>
+                            <p className="text-sm font-semibold text-brand-blue dark:text-white">
+                              {caseItem.displayName}
+                            </p>
                             <p className="text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
                               {caseItem.status === 'done'
                                 ? `${
@@ -1925,507 +1702,311 @@ export default function TriagemPage() {
                   ))
                 )}
               </div>
+              {casesWithInsights.length > 0 ? (
+                <p className="mt-3 text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Clique em um caso para abrir a radiografia.
+                </p>
+              ) : null}
+            </div>
+          </section>
 
-              <div className="mt-6 rounded-2xl border border-white/30 dark:border-white/10 bg-white/40 dark:bg-white/5 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <h3 className="text-xs font-semibold uppercase tracking-wider text-brand-blue dark:text-white">
-                      Visualizacao do caso
-                    </h3>
-                    <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                      Clique em um caso para ver os achados sobrepostos.
-                    </p>
-                  </div>
-                  {selectedCase ? (
-                    <span className="rounded-full bg-brand-blue/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-brand-blue dark:bg-white/10 dark:text-white">
-                      {selectedCase.displayName}
-                    </span>
-                  ) : null}
-                </div>
+          <section className="rounded-3xl border border-white/20 dark:border-white/10 bg-white/45 dark:bg-white/5 backdrop-blur-xl p-6 shadow-xl">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold uppercase tracking-wider text-brand-blue dark:text-white">
+                  Resumo
+                </h2>
+                <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                  Indicadores principais para tomada de decisão.
+                </p>
+              </div>
+            </div>
 
-                <div className="mt-3 relative overflow-hidden rounded-2xl border border-white/40 dark:border-white/10 bg-white/60 dark:bg-slate-900/60 flex items-center justify-center min-h-[320px]">
-                  {selectedCase?.previewUrl ? (
-                    <>
-                      <img
-                        ref={previewImageRef}
-                        src={selectedCase.previewUrl}
-                        alt={selectedCase.displayName}
-                        onLoad={() => setIsPreviewReady(true)}
-                        className="max-h-[480px] w-full object-contain"
-                      />
-                      <canvas
-                        ref={previewCanvasRef}
-                        className="absolute inset-0 h-full w-full pointer-events-none"
-                      />
-                    </>
-                  ) : (
-                    <div className="text-center text-xs text-slate-500 dark:text-slate-400">
-                      {selectedCase
-                        ? 'Vincule a imagem local para visualizar os achados.'
-                        : 'Selecione um caso para visualizar.'}
-                    </div>
-                  )}
-                </div>
+            <div className="mt-4 grid gap-4 sm:grid-cols-3">
+              <div className="rounded-2xl border border-white/30 dark:border-white/10 bg-white/40 dark:bg-white/5 p-4">
+                <p className="text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Casos analisados
+                </p>
+                <p className="mt-2 text-2xl font-semibold text-brand-blue dark:text-white">
+                  {totals.analyzed.length}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-white/30 dark:border-white/10 bg-white/40 dark:bg-white/5 p-4">
+                <p className="text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Achados relevantes
+                </p>
+                <p className="mt-2 text-2xl font-semibold text-brand-blue dark:text-white">
+                  {totals.totalFindings}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-white/30 dark:border-white/10 bg-white/40 dark:bg-white/5 p-4">
+                <p className="text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Alta prioridade
+                </p>
+                <p className="mt-2 text-2xl font-semibold text-brand-blue dark:text-white">
+                  {totals.severityCounts.Alta}
+                </p>
+              </div>
+            </div>
 
-                {selectedCase ? (
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setShowYolo((prev) => !prev)}
-                      className={[
-                        'rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-wider transition-all',
-                        showYolo
-                          ? 'bg-brand-green/20 border-brand-green/40 text-brand-green'
-                          : 'border-brand-blue/30 text-brand-blue dark:text-white/70',
-                      ].join(' ')}
-                    >
-                      YOLO
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowDetectron((prev) => !prev)}
-                      className={[
-                        'rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-wider transition-all',
-                        showDetectron
-                          ? 'bg-sky-200/40 border-sky-200 text-sky-700'
-                          : 'border-brand-blue/30 text-brand-blue dark:text-white/70',
-                      ].join(' ')}
-                    >
-                      Detectron
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowOther((prev) => !prev)}
-                      className={[
-                        'rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-wider transition-all',
-                        showOther
-                          ? 'bg-brand-yellow/20 border-brand-yellow/50 text-brand-blue'
-                          : 'border-brand-blue/30 text-brand-blue dark:text-white/70',
-                      ].join(' ')}
-                    >
-                      Outros
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowOverlayLabels((prev) => !prev)}
-                      className={[
-                        'rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-wider transition-all',
-                        showOverlayLabels
-                          ? 'bg-white/70 border-white/40 text-brand-blue'
-                          : 'border-brand-blue/30 text-brand-blue dark:text-white/70',
-                      ].join(' ')}
-                    >
-                      Rotulos
-                    </button>
-                  </div>
-                ) : null}
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              <span className="rounded-full bg-red-200 px-2 py-1 text-[10px] font-semibold text-red-700">
+                Alta {totals.severityCounts.Alta}
+              </span>
+              <span className="rounded-full bg-brand-yellow/30 px-2 py-1 text-[10px] font-semibold text-brand-blue">
+                Media {totals.severityCounts.Media}
+              </span>
+              <span className="rounded-full bg-brand-green/20 px-2 py-1 text-[10px] font-semibold text-brand-green">
+                Baixa {totals.severityCounts.Baixa}
+              </span>
+            </div>
 
-                {selectedCase ? (
-                  <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                    <span>
-                      Achados:{' '}
-                      {
-                        selectedCase.insights.normalizedFindings.filter(
-                          (finding) =>
-                            finding.category === 'pathology' || finding.category === 'treatment',
-                        ).length
-                      }
-                    </span>
-                    <span>
-                      Dentes mapeados:{' '}
-                      {selectedCase.insights.visibleFindings.filter(
-                        (f) => f.toothId != null || f.toothType,
-                      ).length}
-                    </span>
-                    <span>
-                      Modelo: {formatModelType(selectedCase.modelType)}
-                    </span>
-                  </div>
-                ) : null}
+            <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/60 dark:bg-white/10">
+              <div className="flex h-full w-full">
+                <div
+                  className="h-full bg-red-400"
+                  style={{
+                    width: `${percentOf(totals.severityCounts.Alta, severityTotal)}%`,
+                  }}
+                ></div>
+                <div
+                  className="h-full bg-brand-yellow"
+                  style={{
+                    width: `${percentOf(totals.severityCounts.Media, severityTotal)}%`,
+                  }}
+                ></div>
+                <div
+                  className="h-full bg-brand-green"
+                  style={{
+                    width: `${percentOf(totals.severityCounts.Baixa, severityTotal)}%`,
+                  }}
+                ></div>
+              </div>
+            </div>
 
-                {selectedCase && selectedClinicalProfile ? (
-                  <div className="mt-4 rounded-2xl border border-white/30 dark:border-white/10 bg-white/40 dark:bg-white/5 p-4 text-xs text-slate-600 dark:text-slate-300">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-[11px] font-semibold uppercase tracking-wider text-brand-blue dark:text-white">
-                        Ficha clínica completa (fictícia)
-                      </p>
-                      <span className="rounded-full bg-brand-yellow/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-brand-blue">
-                        Demonstração
-                      </span>
-                    </div>
-                    <div className="mt-3 rounded-xl border border-white/40 bg-white/60 px-3 py-2 text-sm font-semibold text-brand-blue dark:border-white/10 dark:bg-slate-900/40 dark:text-white">
-                      {selectedClinicalProfile.name} · {selectedCase.displayName}
-                    </div>
-                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                      <div>
-                        <p className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                          Idade
-                        </p>
-                        <p className="mt-1 text-sm font-semibold text-brand-blue dark:text-white">
-                          {selectedClinicalProfile.age} anos
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                          Gênero
-                        </p>
-                        <p className="mt-1 text-sm font-semibold text-brand-blue dark:text-white">
-                          {selectedClinicalProfile.gender}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="mt-3">
-                      <p className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                        Queixa principal
-                      </p>
-                      <p className="mt-1 text-sm font-semibold text-brand-blue dark:text-white">
-                        {selectedClinicalProfile.complaint}
-                      </p>
-                    </div>
-                    <div className="mt-3">
-                      <p className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                        Sintomas relatados
-                      </p>
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {selectedClinicalProfile.symptoms.length === 0 ? (
-                          <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                            Sem sintomas relatados
-                          </span>
-                        ) : (
-                          selectedClinicalProfile.symptoms.map((symptom) => (
-                            <span
-                              key={symptom}
-                              className="rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-semibold text-brand-blue dark:bg-white/10 dark:text-white"
-                            >
-                              {symptom}
-                            </span>
-                          ))
-                        )}
-                      </div>
-                    </div>
-                    {selectedClinicalProfile.alerts.length > 0 ? (
-                      <div className="mt-3">
-                        <p className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                          Sinais de alerta
-                        </p>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {selectedClinicalProfile.alerts.map((alert) => (
-                            <span
-                              key={alert}
-                              className="rounded-full bg-red-200 px-2 py-0.5 text-[10px] font-semibold text-red-700"
-                            >
-                              {alert}
-                            </span>
-                          ))}
+            <div className="mt-4 grid gap-4 lg:grid-cols-3">
+              <div className="rounded-2xl border border-white/30 dark:border-white/10 bg-white/40 dark:bg-white/5 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wider text-brand-blue dark:text-white">
+                  Distribuição por sexo
+                </p>
+                <div className="mt-3 space-y-2 text-xs text-slate-600 dark:text-slate-300">
+                  {(['Feminino', 'Masculino', 'Outros'] as const).map((gender) => {
+                    const count = batchSummary.genderCounts[gender];
+                    const percent = percentOf(count, batchSummary.totalCases);
+                    return (
+                      <div key={gender}>
+                        <div className="flex items-center justify-between text-[11px] uppercase tracking-wider">
+                          <span>{gender}</span>
+                          <span>{batchSummary.totalCases ? `${percent}%` : '—'}</span>
                         </div>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-            </section>
-
-            <section className="rounded-3xl border border-white/20 dark:border-white/10 bg-white/45 dark:bg-white/5 backdrop-blur-xl p-6 shadow-xl">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-sm font-semibold uppercase tracking-wider text-brand-blue dark:text-white">
-                    Visão epidemiológica
-                  </h2>
-                  <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
-                    Indicadores principais para tomada de decisão.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleGenerateSummary}
-                  disabled={isSummaryLoading || totals.analyzed.length === 0}
-                  className="flex items-center gap-2 rounded-full bg-brand-green px-4 py-2 text-xs font-semibold text-white shadow-md transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-                >
-                  <FileSearch className="h-4 w-4" />
-                  {isSummaryLoading ? 'Gerando resumo...' : 'Resumo IA'}
-                </button>
-              </div>
-
-              <div className="mt-5 grid gap-4 sm:grid-cols-3">
-                <div className="rounded-2xl border border-white/30 dark:border-white/10 bg-white/40 dark:bg-white/5 p-4">
-                  <p className="text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                    Casos analisados
-                  </p>
-                  <p className="mt-2 text-2xl font-semibold text-brand-blue dark:text-white">
-                    {totals.analyzed.length}
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-white/30 dark:border-white/10 bg-white/40 dark:bg-white/5 p-4">
-                  <p className="text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                    Achados relevantes
-                  </p>
-                  <p className="mt-2 text-2xl font-semibold text-brand-blue dark:text-white">
-                    {totals.totalFindings}
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-white/30 dark:border-white/10 bg-white/40 dark:bg-white/5 p-4">
-                  <p className="text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                    Alta prioridade
-                  </p>
-                  <p className="mt-2 text-2xl font-semibold text-brand-blue dark:text-white">
-                    {totals.severityCounts.Alta}
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-6 grid gap-6 lg:grid-cols-2">
-                <div className="rounded-2xl border border-white/30 dark:border-white/10 bg-white/40 dark:bg-white/5 p-4">
-                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-brand-blue dark:text-white">
-                    <BarChart3 className="h-4 w-4" />
-                    Severidade clínica
-                  </div>
-                  <div className="mt-4 space-y-3 text-xs text-slate-600 dark:text-slate-300">
-                    {[
-                      { label: 'Alta', value: totals.severityCounts.Alta, color: 'bg-red-400' },
-                      { label: 'Media', value: totals.severityCounts.Media, color: 'bg-brand-yellow' },
-                      { label: 'Baixa', value: totals.severityCounts.Baixa, color: 'bg-brand-green' },
-                    ].map((item) => (
-                      <div key={item.label} className="flex items-center gap-3">
-                        <span className="w-12">{item.label}</span>
-                        <div className="h-2 flex-1 overflow-hidden rounded-full bg-white/50 dark:bg-white/10">
-                          <div
-                            className={`h-full ${item.color}`}
-                            style={{
-                              width: `${toPercent(
-                                item.value,
-                                Math.max(
-                                  totals.severityCounts.Alta,
-                                  totals.severityCounts.Media,
-                                  totals.severityCounts.Baixa,
-                                  1,
-                                ),
-                              )}%`,
-                            }}
-                          ></div>
-                        </div>
-                        <span className="w-6 text-right">{item.value}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div className="rounded-2xl border border-white/30 dark:border-white/10 bg-white/40 dark:bg-white/5 p-4">
-                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-brand-blue dark:text-white">
-                    <CheckCircle2 className="h-4 w-4" />
-                    Necessidades encontradas
-                  </div>
-                  <div className="mt-4 space-y-3 text-xs text-slate-600 dark:text-slate-300">
-                    {totals.topNeeds.length === 0 ? (
-                      <p className="text-xs text-slate-500 dark:text-slate-400">
-                        Sem dados suficientes ainda.
-                      </p>
-                    ) : (
-                      totals.topNeeds.map(([need, count]) => (
-                        <div key={need} className="flex items-center gap-3">
-                          <span className="flex-1">{need}</span>
-                          <span className="rounded-full bg-brand-blue/10 px-2 py-0.5 text-[10px] font-semibold text-brand-blue dark:bg-white/10 dark:text-white">
-                            {count}
-                          </span>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-6 rounded-2xl border border-white/30 dark:border-white/10 bg-white/40 dark:bg-white/5 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wider text-brand-blue dark:text-white">
-                      Top achados
-                    </p>
-                    <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                      Distribuição das principais suspeitas.
-                    </p>
-                  </div>
-                </div>
-                <div className="mt-4 space-y-3 text-xs text-slate-600 dark:text-slate-300">
-                  {totals.topLabels.length === 0 ? (
-                    <p className="text-xs text-slate-500 dark:text-slate-400">
-                      Aguarde as primeiras analises.
-                    </p>
-                  ) : (
-                    totals.topLabels.map(([label, count]) => (
-                      <div key={label} className="flex items-center gap-3">
-                        <span className="w-28 truncate">{label}</span>
-                        <div className="h-2 flex-1 overflow-hidden rounded-full bg-white/50 dark:bg-white/10">
+                        <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-white/60 dark:bg-white/10">
                           <div
                             className="h-full bg-brand-blue"
+                            style={{ width: `${percent}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/30 dark:border-white/10 bg-white/40 dark:bg-white/5 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wider text-brand-blue dark:text-white">
+                  Faixa etária
+                </p>
+                <div className="mt-3 space-y-2 text-xs text-slate-600 dark:text-slate-300">
+                  {batchSummary.ageBuckets.length === 0 ? (
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Sem dados suficientes.
+                    </p>
+                  ) : (
+                    batchSummary.ageBuckets.map((bucket) => (
+                      <div key={bucket.label}>
+                        <div className="flex items-center justify-between text-[11px] uppercase tracking-wider">
+                          <span>{bucket.label}</span>
+                          <span>{batchSummary.totalCases ? bucket.count : '—'}</span>
+                        </div>
+                        <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-white/60 dark:bg-white/10">
+                          <div
+                            className="h-full bg-brand-green"
                             style={{
-                              width: `${toPercent(
-                                count,
-                                Math.max(...totals.topLabels.map(([, value]) => value), 1),
-                              )}%`,
+                              width: `${percentOf(bucket.count, ageBucketMax)}%`,
                             }}
                           ></div>
                         </div>
-                        <span className="w-6 text-right">{count}</span>
                       </div>
                     ))
                   )}
                 </div>
               </div>
 
-              <div className="mt-6 rounded-2xl border border-white/30 dark:border-white/10 bg-white/40 dark:bg-white/5 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wider text-brand-blue dark:text-white">
-                      Distribuição dentária
-                    </p>
-                    <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                      Estimativa de dentes presentes e ausentes.
-                    </p>
-                  </div>
-                  <span className="rounded-full bg-brand-blue/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-brand-blue dark:bg-white/10 dark:text-white">
-                    Estimativa
-                  </span>
-                </div>
-                <div className="mt-4 grid gap-4 text-xs text-slate-600 dark:text-slate-300 sm:grid-cols-2">
-                  <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                      Dentes detectados
-                    </p>
-                    <div className="mt-2 space-y-2">
-                      {Array.from(totals.toothGroupCounts.entries()).length === 0 ? (
-                        <p className="text-xs text-slate-500 dark:text-slate-400">
-                          Sem dados suficientes.
-                        </p>
-                      ) : (
-                        Array.from(totals.toothGroupCounts.entries())
-                          .sort((a, b) => b[1] - a[1])
-                          .map(([group, count]) => (
-                            <div key={group} className="flex items-center justify-between">
-                              <span>{TOOTH_GROUP_LABELS[group] ?? group}</span>
-                              <span className="rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-semibold text-brand-blue dark:bg-white/10 dark:text-white">
-                                {count}
-                              </span>
-                            </div>
-                          ))
-                      )}
-                    </div>
-                  </div>
-                  <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                      Ausentes (estimado)
-                    </p>
-                    <div className="mt-2 space-y-2">
-                      {Object.keys(totals.missingCounts).length === 0 ? (
-                        <p className="text-xs text-slate-500 dark:text-slate-400">
-                          Sem dados suficientes.
-                        </p>
-                      ) : (
-                        Object.entries(totals.missingCounts).map(([group, count]) => (
-                          <div key={group} className="flex items-center justify-between">
-                            <span>{TOOTH_GROUP_LABELS[group] ?? group}</span>
-                            <span className="rounded-full bg-brand-yellow/20 px-2 py-0.5 text-[10px] font-semibold text-brand-blue">
-                              {count}
-                            </span>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-6 rounded-2xl border border-white/30 dark:border-white/10 bg-white/40 dark:bg-white/5 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-brand-blue dark:text-white">
-                    Resumo IA
-                  </p>
-                  <span className="rounded-full bg-brand-green/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-brand-green">
-                    IA clinica
-                  </span>
-                </div>
-                {summary ? (
-                  <p className="mt-3 text-sm text-slate-700 dark:text-slate-200 whitespace-pre-line">
-                    {summary}
-                  </p>
-                ) : (
-                  <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-                    Gere um resumo para destacar riscos coletivos, prioridades e planejamento de
-                    recursos.
-                  </p>
-                )}
-                {summaryError ? (
-                  <p className="mt-3 text-xs text-red-500 dark:text-red-300">{summaryError}</p>
-                ) : null}
-              </div>
-            </section>
-          </div>
-
-          <section className="rounded-3xl border border-white/20 dark:border-white/10 bg-white/45 dark:bg-white/5 backdrop-blur-xl p-6 shadow-xl">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-semibold uppercase tracking-wider text-brand-blue dark:text-white">
-                  Prioridade clínica
-                </h2>
-                <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
-                  Lista ordenada para visitas e encaminhamentos imediatos.
+              <div className="rounded-2xl border border-white/30 dark:border-white/10 bg-white/40 dark:bg-white/5 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wider text-brand-blue dark:text-white">
+                  Queixas mais comuns
                 </p>
+                <div className="mt-3 space-y-2 text-xs text-slate-600 dark:text-slate-300">
+                  {batchSummary.topComplaints.length === 0 ? (
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Aguardando registros.
+                    </p>
+                  ) : (
+                    batchSummary.topComplaints.map(([complaint, count]) => (
+                      <div key={complaint}>
+                        <div className="flex items-center justify-between gap-2 text-[11px] uppercase tracking-wider">
+                          <span className="truncate">{complaint}</span>
+                          <span>{count}</span>
+                        </div>
+                        <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-white/60 dark:bg-white/10">
+                          <div
+                            className="h-full bg-brand-yellow"
+                            style={{
+                              width: `${percentOf(count, complaintMax)}%`,
+                            }}
+                          ></div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
-              <span className="rounded-full border border-brand-blue/30 dark:border-white/20 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-brand-blue dark:text-white">
-                {priorityCases.length} casos prioritários
-              </span>
             </div>
 
-            <div className="mt-4 grid gap-3 lg:grid-cols-2">
-              {priorityCases.length === 0 ? (
-                <div className="rounded-2xl border border-white/30 dark:border-white/10 bg-white/30 dark:bg-white/5 p-4 text-sm text-slate-600 dark:text-slate-300">
-                  Nenhum caso prioritário ainda.
-                </div>
-              ) : (
-                priorityCases.map((caseItem) => (
-                  <div
-                    key={caseItem.id}
-                    className="flex items-center gap-3 rounded-2xl border border-white/30 dark:border-white/10 bg-white/30 dark:bg-white/5 p-4"
-                  >
-                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-brand-blue/10 text-brand-blue dark:bg-white/10 dark:text-white">
-                      <BarChart3 className="h-5 w-5" />
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-semibold text-brand-blue dark:text-white">
-                        {caseItem.displayName}
-                      </p>
-                      <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
-                        {caseItem.insights.topFindings.length > 0
-                          ? caseItem.insights.topFindings.join(', ')
-                          : 'Sem achados relevantes'}
-                      </p>
-                      <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                        {caseItem.insights.needs.length > 0 ? (
-                          caseItem.insights.needs.map((need) => (
-                            <span
-                              key={need}
-                              className="rounded-full bg-brand-blue/10 px-2 py-0.5 text-brand-blue dark:bg-white/10 dark:text-white"
-                            >
-                              {need}
-                            </span>
-                          ))
-                        ) : (
-                          <span>Sem necessidades</span>
-                        )}
+            <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+              * Dados clínicos fictícios para demonstração.
+            </p>
+
+            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+              <div className="rounded-2xl border border-white/30 dark:border-white/10 bg-white/40 dark:bg-white/5 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wider text-brand-blue dark:text-white">
+                  Top achados
+                </p>
+                <div className="mt-3 space-y-2 text-xs text-slate-600 dark:text-slate-300">
+                  {totals.topLabels.length === 0 ? (
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Aguarde as primeiras análises.
+                    </p>
+                  ) : (
+                    totals.topLabels.slice(0, 6).map(([label, count]) => (
+                      <div key={label}>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate">{label}</span>
+                          <span className="rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-semibold text-brand-blue dark:bg-white/10 dark:text-white">
+                            {count} · {percentOf(count, totals.totalFindings)}%
+                          </span>
+                        </div>
+                        <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-white/60 dark:bg-white/10">
+                          <div
+                            className="h-full bg-brand-blue"
+                            style={{ width: `${percentOf(count, topLabelMax)}%` }}
+                          ></div>
+                        </div>
                       </div>
-                    </div>
-                    <span
-                      className={[
-                        'rounded-full px-3 py-1 text-[10px] font-semibold uppercase tracking-wider',
-                        caseItem.insights.severity === 'Alta'
-                          ? 'bg-red-200 text-red-600'
-                          : caseItem.insights.severity === 'Media'
-                            ? 'bg-brand-yellow/30 text-brand-blue'
-                            : 'bg-brand-green/20 text-brand-green',
-                      ].join(' ')}
+                    ))
+                  )}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-white/30 dark:border-white/10 bg-white/40 dark:bg-white/5 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wider text-brand-blue dark:text-white">
+                  Necessidades e ausências
+                </p>
+                <div className="mt-3 space-y-2 text-xs text-slate-600 dark:text-slate-300">
+                  {totals.topNeeds.length === 0 ? (
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Sem necessidades registradas.
+                    </p>
+                  ) : (
+                    totals.topNeeds.slice(0, 6).map(([need, count]) => (
+                      <div key={need}>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate">{need}</span>
+                          <span className="rounded-full bg-brand-blue/10 px-2 py-0.5 text-[10px] font-semibold text-brand-blue dark:bg-white/10 dark:text-white">
+                            {count}
+                          </span>
+                        </div>
+                        <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-white/60 dark:bg-white/10">
+                          <div
+                            className="h-full bg-brand-blue"
+                            style={{ width: `${percentOf(count, topNeedMax)}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+                <div className="mt-4 space-y-2 text-xs text-slate-600 dark:text-slate-300">
+                  {Object.keys(totals.missingCounts).length === 0 ? (
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Sem ausências estimadas.
+                    </p>
+                  ) : (
+                    Object.entries(totals.missingCounts).map(([group, count]) => (
+                      <div key={group}>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate">{TOOTH_GROUP_LABELS[group] ?? group}</span>
+                          <span className="rounded-full bg-brand-yellow/20 px-2 py-0.5 text-[10px] font-semibold text-brand-blue">
+                            {count}
+                          </span>
+                        </div>
+                        <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-white/60 dark:bg-white/10">
+                          <div
+                            className="h-full bg-brand-yellow"
+                            style={{ width: `${percentOf(count, missingMax)}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-white/30 dark:border-white/10 bg-white/40 dark:bg-white/5 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs font-semibold uppercase tracking-wider text-brand-blue dark:text-white">
+                  Casos prioritários
+                </p>
+                <span className="rounded-full bg-brand-blue/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-brand-blue dark:bg-white/10 dark:text-white">
+                  {priorityCases.length}
+                </span>
+              </div>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                {priorityCases.length === 0 ? (
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Nenhum caso prioritário ainda.
+                  </p>
+                ) : (
+                  priorityCases.slice(0, 6).map((caseItem) => (
+                    <div
+                      key={caseItem.id}
+                      className="flex items-center justify-between gap-2 rounded-xl border border-white/40 bg-white/60 px-3 py-2 text-xs text-slate-600 dark:border-white/10 dark:bg-slate-900/40 dark:text-slate-200"
                     >
-                      {caseItem.insights.severity}
-                    </span>
-                  </div>
-                ))
-              )}
+                      <div>
+                        <p className="font-semibold text-brand-blue dark:text-white">
+                          {caseItem.displayName}
+                        </p>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                          {caseItem.insights.topFindings.length > 0
+                            ? caseItem.insights.topFindings.join(', ')
+                            : 'Sem achados relevantes'}
+                        </p>
+                      </div>
+                      <span
+                        className={[
+                          'rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider',
+                          caseItem.insights.severity === 'Alta'
+                            ? 'bg-red-200 text-red-600'
+                            : caseItem.insights.severity === 'Media'
+                              ? 'bg-brand-yellow/30 text-brand-blue'
+                              : 'bg-brand-green/20 text-brand-green',
+                        ].join(' ')}
+                      >
+                        {caseItem.insights.severity}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
           </section>
         </div>

@@ -16,12 +16,6 @@ const GlassCard = ({ children, className = '' }: { children: React.ReactNode, cl
 );
 
 const layout = {
-    logo: {
-        x: 482.16146614635363,
-        y: -59.53645772347227,
-        w: 744.6250066943467,
-        h: 643.5520870154724,
-    },
     wordmark: {
         x: 677.3749969415367,
         y: 437.1041749250144,
@@ -155,18 +149,15 @@ export default function PresentationPage() {
 
     return (
         <div className="min-h-screen flex flex-col items-center justify-start px-6 pb-24 pt-12 antialiased relative overflow-hidden transition-colors duration-500 text-gray-900 dark:text-gray-100 bg-background">
-            <div className="absolute inset-0 w-full h-full overflow-hidden z-0 pointer-events-none flag-stage">
-                <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 brightness-100 contrast-150 mix-blend-overlay"></div>
-                <div className="flag-canvas">
-                    <div className="flag-shape flag-green"></div>
-                    <div className="flag-shape flag-yellow"></div>
-                    <div className="flag-shape flag-blue"></div>
-                    <div className="flag-glow"></div>
-                </div>
-                <div className="flag-glass"></div>
+            <div className="absolute inset-0 z-0 pointer-events-none flex items-center justify-center">
+                <img
+                    src="https://i.ibb.co/9HFVnY4x/Gemini-Generated-Image-oc1jgfoc1jgfoc1j-Photoroom.png"
+                    alt="Logo RadiologIA"
+                    className="w-[70vw] max-w-[980px] opacity-90 blur-2xl object-contain"
+                />
             </div>
 
-            <header className="absolute right-6 top-6 z-10 flex flex-wrap items-center gap-3">
+            <header className="absolute right-6 top-6 z-30 pointer-events-auto flex flex-wrap items-center gap-3">
                 <button
                     onClick={toggleTheme}
                     className="p-2.5 rounded-full glass-panel shadow-lg hover:scale-105 transition-transform text-brand-blue dark:text-brand-yellow"
@@ -217,16 +208,6 @@ export default function PresentationPage() {
             </header>
 
             <div className="relative z-10 w-full max-w-[1600px] aspect-[16/9] mx-auto">
-                <div className="absolute z-10" style={toStyle(layout.logo)}>
-                    <div className="relative flex items-center justify-center w-full h-full">
-                        <img 
-                            src="https://i.ibb.co/9HFVnY4x/Gemini-Generated-Image-oc1jgfoc1jgfoc1j-Photoroom.png"
-                            alt="Logo RadiologIA"
-                            className="relative w-full h-full object-contain drop-shadow-xl"
-                        />
-                    </div>
-                </div>
-
                 <div className="absolute z-10" style={toStyle(layout.wordmark)}>
                     <img
                         src={isDarkMode

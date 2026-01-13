@@ -1571,7 +1571,7 @@ export default function TriagemPage() {
 
   return (
     <div className="min-h-screen relative overflow-hidden transition-colors duration-500 text-gray-900 dark:text-gray-100 bg-background">
-      <header className="absolute left-6 right-6 top-6 z-20 flex flex-wrap items-center justify-between gap-4">
+      <header className="absolute left-6 right-6 top-6 z-30 pointer-events-auto flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -1595,7 +1595,7 @@ export default function TriagemPage() {
         <div className="flex flex-wrap items-center gap-3">
           <button
             onClick={toggleTheme}
-            className="p-2.5 rounded-full glass-panel shadow-lg hover:scale-105 transition-transform text-brand-blue dark:text-brand-yellow"
+            className="relative pointer-events-auto p-2.5 rounded-full glass-panel shadow-lg hover:scale-105 transition-transform text-brand-blue dark:text-brand-yellow"
             title="Alternar tema"
           >
             {isDarkMode ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
@@ -1604,7 +1604,7 @@ export default function TriagemPage() {
           <Popover>
             <PopoverTrigger asChild>
               <button
-                className="flex items-center gap-2 rounded-full glass-panel border border-brand-blue/20 dark:border-white/15 px-3 py-2 text-xs uppercase tracking-wider font-semibold text-brand-blue/80 dark:text-white/80"
+                className="relative pointer-events-auto flex items-center gap-2 rounded-full glass-panel border border-brand-blue/20 dark:border-white/15 px-3 py-2 text-xs uppercase tracking-wider font-semibold text-brand-blue/80 dark:text-white/80"
                 title="Perfil"
               >
                 <span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-blue/10 text-brand-blue dark:bg-white/10 dark:text-white">

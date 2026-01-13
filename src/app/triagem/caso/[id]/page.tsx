@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, FileSearch } from 'lucide-react';
 import { useParams, useRouter } from 'next/navigation';
+import FindingsViewer from '@/components/triagem/FindingsViewer';
 
 type FindingCategory =
   | 'structure'
@@ -686,23 +687,6 @@ const getSourceKind = (finding: Finding) => {
   return 'other';
 };
 
-const getFindingStyle = (finding: Finding) => {
-  const label = (finding.canonicalLabel ?? finding.label).toLowerCase();
-  if (finding.category === 'pathology' || label.includes('carie') || label.includes('lesao')) {
-    return { stroke: '#f87171', fill: 'rgba(248, 113, 113, 0.2)' };
-  }
-  if (finding.category === 'treatment') {
-    return { stroke: '#fbbf24', fill: 'rgba(251, 191, 36, 0.2)' };
-  }
-  if (finding.category === 'structure') {
-    return { stroke: '#38bdf8', fill: 'rgba(56, 189, 248, 0.18)' };
-  }
-  if (finding.category === 'tooth') {
-    return { stroke: '#4ade80', fill: 'rgba(74, 222, 128, 0.2)' };
-  }
-  return { stroke: '#94a3b8', fill: 'rgba(148, 163, 184, 0.2)' };
-};
-
 export default function TriagemCasoPage() {
   const router = useRouter();
   const params = useParams();
@@ -714,9 +698,6 @@ export default function TriagemCasoPage() {
   const [caseData, setCaseData] = useState<StoredCase | null>(null);
   const [loadState, setLoadState] = useState<'idle' | 'loading' | 'error'>('idle');
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [isPreviewReady, setIsPreviewReady] = useState(false);
-  const previewImageRef = useRef<HTMLImageElement | null>(null);
-  const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
     if (!caseId) {
@@ -808,99 +789,6 @@ export default function TriagemCasoPage() {
     return caseData.insights.normalizedFindings ?? [];
   }, [caseData]);
 
-  const visibleFindings = useMemo(() => {
-    return findings.filter(
-      (finding) => finding.category === 'pathology' || finding.category === 'treatment',
-    );
-  }, [findings]);
-
-  useEffect(() => {
-    const canvas = previewCanvasRef.current;
-    const img = previewImageRef.current;
-    if (!canvas || !img || !caseData || !isPreviewReady) {
-      return;
-    }
-
-    const draw = () => {
-      const displayWidth = img.clientWidth;
-      const displayHeight = img.clientHeight;
-      if (displayWidth === 0 || displayHeight === 0) {
-        return;
-      }
-      canvas.width = displayWidth;
-      canvas.height = displayHeight;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        return;
-      }
-      ctx.clearRect(0, 0, displayWidth, displayHeight);
-      const scaleX = displayWidth / (img.naturalWidth || displayWidth);
-      const scaleY = displayHeight / (img.naturalHeight || displayHeight);
-
-      findings.forEach((finding) => {
-        const style = getFindingStyle(finding);
-        ctx.strokeStyle = style.stroke;
-        ctx.fillStyle = style.fill;
-        ctx.lineWidth = 2;
-
-        if (finding.segmentation?.length) {
-          ctx.beginPath();
-          finding.segmentation.forEach((point, index) => {
-            const x = point[0] * scaleX;
-            const y = point[1] * scaleY;
-            if (index === 0) {
-              ctx.moveTo(x, y);
-            } else {
-              ctx.lineTo(x, y);
-            }
-          });
-          ctx.closePath();
-          ctx.stroke();
-          ctx.fill();
-        } else if (finding.bbox?.length === 4) {
-          const [x1, y1, x2, y2] = finding.bbox;
-          const width = (x2 - x1) * scaleX;
-          const height = (y2 - y1) * scaleY;
-          ctx.strokeRect(x1 * scaleX, y1 * scaleY, width, height);
-          ctx.fillRect(x1 * scaleX, y1 * scaleY, width, height);
-        }
-
-        const label = finding.displayLabel ?? finding.label;
-        const sourceKind = getSourceKind(finding);
-        const sourceShort = sourceKind === 'detectron' ? 'D' : sourceKind === 'yolo' ? 'Y' : 'O';
-        const toothText = finding.toothId != null ? `·${finding.toothId}` : finding.toothType ? `·${finding.toothType}` : '';
-        const labelText = `${label}${toothText}·${sourceShort}`;
-
-        let labelX = 8;
-        let labelY = 14;
-        if (finding.bbox?.length === 4) {
-          const [x1, y1] = finding.bbox;
-          labelX = x1 * scaleX + 4;
-          labelY = y1 * scaleY + 14;
-        } else if (finding.segmentation?.length) {
-          const [x, y] = finding.segmentation[0];
-          labelX = x * scaleX + 4;
-          labelY = y * scaleY + 14;
-        }
-
-        ctx.font = '11px ui-sans-serif, system-ui, -apple-system, sans-serif';
-        const metrics = ctx.measureText(labelText);
-        const padding = 3;
-        const textWidth = metrics.width + padding * 2;
-        const textHeight = 14;
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.65)';
-        ctx.fillRect(labelX, labelY - textHeight, textWidth, textHeight);
-        ctx.fillStyle = '#f8fafc';
-        ctx.fillText(labelText, labelX + padding, labelY - 3);
-      });
-    };
-
-    draw();
-    const handleResize = () => draw();
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, [caseData, findings, isPreviewReady]);
-
   if (!caseData) {
     return (
       <div className="min-h-screen bg-background text-gray-900 dark:text-gray-100">
@@ -946,37 +834,17 @@ export default function TriagemCasoPage() {
 
       <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 pb-10">
         <section className="rounded-3xl border border-white/20 bg-white/60 p-6 shadow-xl dark:border-white/10 dark:bg-white/5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-xs uppercase tracking-[0.3em] text-brand-blue/60 dark:text-white/60">
-                Radiografia panorâmica
-              </p>
-              <h2 className="mt-2 text-xl font-semibold text-brand-blue dark:text-white">
-                Diagnóstico visual completo
-              </h2>
-            </div>
-            <span className="rounded-full bg-brand-yellow/20 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-brand-blue">
-              Dados fictícios
-            </span>
-          </div>
-          <div className="mt-4 relative overflow-hidden rounded-2xl border border-white/40 bg-white/60 dark:border-white/10 dark:bg-slate-900/60 min-h-[420px] flex items-center justify-center">
-            {caseData.previewUrl ? (
-              <>
-                <img
-                  ref={previewImageRef}
-                  src={caseData.previewUrl}
-                  alt={caseData.displayName}
-                  onLoad={() => setIsPreviewReady(true)}
-                  className="max-h-[560px] w-full object-contain"
-                />
-                <canvas ref={previewCanvasRef} className="absolute inset-0 h-full w-full pointer-events-none" />
-              </>
-            ) : (
-              <div className="text-xs text-slate-500 dark:text-slate-400">
-                Imagem não disponível para este caso.
-              </div>
-            )}
-          </div>
+          <FindingsViewer
+            imageUrl={caseData.previewUrl}
+            findings={findings}
+            title="Diagnóstico visual completo"
+            subtitle="Overlay integrado com patologia, tratamento e dentes presentes."
+            toolbar={
+              <span className="rounded-full bg-brand-yellow/20 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-brand-blue">
+                Dados fictícios
+              </span>
+            }
+          />
         </section>
 
         <div className="grid gap-6 lg:grid-cols-[1.2fr_1fr]">
@@ -1066,38 +934,18 @@ export default function TriagemCasoPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wider text-brand-blue dark:text-white">
-                  Achados principais
+                  Prioridade clínica
                 </p>
                 <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                  Resumo das principais suspeitas clínicas.
+                  Resumo rápido das necessidades principais.
                 </p>
               </div>
               <span className="rounded-full bg-brand-blue/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-brand-blue dark:bg-white/10 dark:text-white">
-                {visibleFindings.length} achados
+                {caseData.insights.severity}
               </span>
             </div>
 
-            <div className="mt-4 space-y-3 text-xs text-slate-600 dark:text-slate-300">
-              {visibleFindings.length === 0 ? (
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Nenhum achado clínico relevante.
-                </p>
-              ) : (
-                visibleFindings.slice(0, 12).map((finding, index) => (
-                  <div
-                    key={`${finding.label}-${index}`}
-                    className="flex items-center justify-between rounded-xl border border-white/40 bg-white/70 px-3 py-2 dark:border-white/10 dark:bg-slate-900/40"
-                  >
-                    <span className="font-semibold">{finding.displayLabel ?? finding.label}</span>
-                    <span className="text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                      {finding.toothId ? `FDI ${finding.toothId}` : finding.toothType ?? 'Sem dente'}
-                    </span>
-                  </div>
-                ))
-              )}
-            </div>
-
-            <div className="mt-5 rounded-2xl border border-white/30 bg-white/70 p-4 text-xs text-slate-600 dark:border-white/10 dark:bg-slate-900/40 dark:text-slate-200">
+            <div className="mt-4 rounded-2xl border border-white/30 bg-white/70 p-4 text-xs text-slate-600 dark:border-white/10 dark:bg-slate-900/40 dark:text-slate-200">
               <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-brand-blue dark:text-white">
                 <FileSearch className="h-4 w-4" />
                 Prioridade clínica
@@ -1107,6 +955,9 @@ export default function TriagemCasoPage() {
               </p>
               <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                 Necessidades principais: {caseData.insights.needs.join(', ') || 'Não definido'}
+              </p>
+              <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                Achados mais frequentes: {caseData.insights.topFindings.join(', ') || 'Sem achados'}
               </p>
             </div>
           </section>

@@ -84,6 +84,11 @@
     color: white;
   }
 
+  .image-raw {
+    image-orientation: none;
+    -webkit-image-orientation: none;
+  }
+
   .animate-spin-custom {
     animation: spin 1s linear infinite;
   }

@@ -76,6 +76,8 @@ export default function AuxiliarClinicoPage() {
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [findings, setFindings] = useState<Finding[]>([]);
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
+  const [chatCopyStatus, setChatCopyStatus] = useState<string | null>(null);
+  const [lastChatExchange, setLastChatExchange] = useState<{ request: unknown; response?: unknown } | null>(null);
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([
     { role: 'system', text: 'Aguardando contexto da imagem.' },
   ]);
@@ -129,6 +131,39 @@ export default function AuxiliarClinicoPage() {
         ? 'bg-white/70 text-brand-blue shadow-sm dark:bg-white/10 dark:text-white'
         : 'text-brand-blue/70 hover:text-brand-blue dark:text-white/60 dark:hover:text-white',
     ].join(' ');
+
+  const renderBoldSegments = (line: string) => {
+    const segments = line.split(/(\*\*[^*]+\*\*)/g);
+    return segments.map((segment, index) => {
+      if (segment.startsWith('**') && segment.endsWith('**') && segment.length > 4) {
+        return <strong key={`b-${index}`}>{segment.slice(2, -2)}</strong>;
+      }
+      return <span key={`t-${index}`}>{segment}</span>;
+    });
+  };
+
+  const renderChatText = (text: string) => {
+    const lines = text.split('\n');
+    return lines.map((line, index) => (
+      <span key={`line-${index}`}>
+        {renderBoldSegments(line)}
+        {index < lines.length - 1 ? <br /> : null}
+      </span>
+    ));
+  };
+
+  const renderTypingIndicator = () => (
+    <div className="text-left">
+      <p className="text-[11px] tracking-wider text-slate-500 dark:text-slate-400">
+        radiologIA
+      </p>
+      <div className="mt-1 inline-flex items-center gap-1 rounded-2xl border border-white/30 bg-white/60 px-3 py-2 text-slate-700 shadow-sm dark:border-white/10 dark:bg-slate-900/50 dark:text-slate-200">
+        <span className="typing-dot inline-block h-2 w-2 rounded-full bg-brand-blue dark:bg-white/80" style={{ animationDelay: '0ms' }}></span>
+        <span className="typing-dot inline-block h-2 w-2 rounded-full bg-brand-blue dark:bg-white/80" style={{ animationDelay: '150ms' }}></span>
+        <span className="typing-dot inline-block h-2 w-2 rounded-full bg-brand-blue dark:bg-white/80" style={{ animationDelay: '300ms' }}></span>
+      </div>
+    </div>
+  );
 
   const chatContext = useMemo(() => {
     if (findings.length === 0) {
@@ -450,13 +485,6 @@ export default function AuxiliarClinicoPage() {
     if (!text) {
       return;
     }
-    if (!baseApiUrl) {
-      setChatHistory((prev) => [
-        ...prev,
-        { role: 'system', text: 'Configure NEXT_PUBLIC_MODAL_API_URL para usar o backend.' },
-      ]);
-      return;
-    }
 
     const nextHistory: ChatMessage[] = [...chatHistory, { role: 'user', text }];
     setChatHistory(nextHistory);
@@ -470,22 +498,36 @@ export default function AuxiliarClinicoPage() {
           .filter((message) => message.role !== 'system')
           .map((message) => ({ role: message.role, text: message.text })),
       };
+      setLastChatExchange({ request: payload });
 
-      const response = await fetch(`${baseApiUrl}/chat`, {
+      const response = await fetch('/api/gemini', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
-        const textResponse = await response.text();
-        throw new Error(textResponse || 'Falha ao enviar chat.');
+        let errorMessage = 'Falha ao enviar chat.';
+        try {
+          const data = await response.json();
+          if (typeof data?.error === 'string' && data.error.trim()) {
+            errorMessage = data.error;
+          }
+        } catch (error) {
+          const textResponse = await response.text();
+          if (textResponse) {
+            errorMessage = textResponse;
+          }
+        }
+        throw new Error(errorMessage);
       }
 
       const data = await response.json();
+      setLastChatExchange({ request: payload, response: data });
       setChatHistory((prev) => [...prev, { role: 'model', text: data.response }]);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Falha no chat.';
+      setLastChatExchange((prev) => (prev ? { ...prev, response: { error: message } } : null));
       setChatHistory((prev) => [
         ...prev,
         { role: 'system', text: `Erro no chat: ${message}` },
@@ -493,6 +535,35 @@ export default function AuxiliarClinicoPage() {
     } finally {
       setIsChatSending(false);
     }
+  };
+
+  const handleCopyChatJson = async () => {
+    if (!lastChatExchange) {
+      setChatCopyStatus('Nada para copiar.');
+      window.setTimeout(() => setChatCopyStatus(null), 2000);
+      return;
+    }
+    const payload = {
+      generatedAt: new Date().toISOString(),
+      ...lastChatExchange,
+    };
+    const text = JSON.stringify(payload, null, 2);
+    try {
+      await navigator.clipboard.writeText(text);
+      setChatCopyStatus('JSON copiado.');
+    } catch (error) {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(textarea);
+      setChatCopyStatus(ok ? 'JSON copiado.' : 'Falha ao copiar JSON.');
+    }
+    window.setTimeout(() => setChatCopyStatus(null), 2000);
   };
 
   if (isLoading || !tokenChecked) {
@@ -609,13 +680,29 @@ export default function AuxiliarClinicoPage() {
         <div className="w-full flex min-h-[calc(100vh-8.5rem)] flex-col">
           {activeTab === 'chat' ? (
             <section className="flex-1 border border-white/20 dark:border-white/10 rounded-3xl bg-white/45 dark:bg-white/5 backdrop-blur-xl p-6 shadow-xl">
-              <div>
-                <h1 className="text-2xl font-semibold text-brand-blue dark:text-white">
-                  Auxiliar Clinico
-                </h1>
-                <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-                  Faca perguntas rapidas sobre protocolos, condutas e casos.
-                </p>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h1 className="text-2xl font-semibold text-brand-blue dark:text-white">
+                    Auxiliar Clinico
+                  </h1>
+                  <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                    Faca perguntas rapidas sobre protocolos, condutas e casos.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCopyChatJson}
+                    className="rounded-full border border-brand-blue/40 px-4 py-2 text-xs font-semibold text-brand-blue shadow-md transition-all hover:bg-brand-blue/10 dark:border-white/20 dark:text-white/80 dark:hover:bg-white/10"
+                  >
+                    Copiar JSON
+                  </button>
+                  {chatCopyStatus ? (
+                    <span className="text-[10px] uppercase tracking-wider text-brand-green">
+                      {chatCopyStatus}
+                    </span>
+                  ) : null}
+                </div>
               </div>
 
               <div className="mt-6 flex h-full flex-col gap-4">
@@ -629,16 +716,17 @@ export default function AuxiliarClinicoPage() {
                           </p>
                         ) : (
                           <div className={message.role === 'user' ? 'text-right' : 'text-left'}>
-                            <p className="text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                              {message.role === 'user' ? 'Voce' : 'RadiologIA'}
+                            <p className="text-[11px] tracking-wider text-slate-500 dark:text-slate-400">
+                              {message.role === 'user' ? 'Voce' : 'radiologIA'}
                             </p>
-                            <p className="mt-1 text-sm text-slate-700 dark:text-slate-200 whitespace-pre-line">
-                              {message.text}
+                            <p className="mt-1 text-sm text-slate-700 dark:text-slate-200">
+                              {renderChatText(message.text)}
                             </p>
                           </div>
                         )}
                       </div>
                     ))}
+                    {isChatSending ? renderTypingIndicator() : null}
                   </div>
                 </div>
                 <div className="flex flex-col gap-3 sm:flex-row">
@@ -755,7 +843,7 @@ export default function AuxiliarClinicoPage() {
                 ) : null}
               </div>
               <div className="border-t border-white/20 dark:border-white/10 bg-white/60 dark:bg-slate-900/50 backdrop-blur-xl p-6">
-                <div className="flex items-center justify-between gap-4">
+                <div className="flex flex-wrap items-center justify-between gap-4">
                   <div>
                     <h2 className="text-sm font-semibold uppercase tracking-wider text-brand-blue dark:text-white">
                       Chat clinico
@@ -764,13 +852,27 @@ export default function AuxiliarClinicoPage() {
                       Conversa contextual com achados do RX.
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsChatExpanded((prev) => !prev)}
-                    className="rounded-full border border-brand-blue/30 dark:border-white/20 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-brand-blue dark:text-white hover:bg-white/40 dark:hover:bg-white/10 transition-all"
-                  >
-                    {isChatExpanded ? 'Recolher chat' : 'Expandir chat'}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleCopyChatJson}
+                      className="rounded-full border border-brand-blue/40 px-4 py-2 text-xs font-semibold text-brand-blue shadow-md transition-all hover:bg-brand-blue/10 dark:border-white/20 dark:text-white/80 dark:hover:bg-white/10"
+                    >
+                      Copiar JSON
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsChatExpanded((prev) => !prev)}
+                      className="rounded-full border border-brand-blue/30 dark:border-white/20 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-brand-blue dark:text-white hover:bg-white/40 dark:hover:bg-white/10 transition-all"
+                    >
+                      {isChatExpanded ? 'Recolher chat' : 'Expandir chat'}
+                    </button>
+                    {chatCopyStatus ? (
+                      <span className="text-[10px] uppercase tracking-wider text-brand-green">
+                        {chatCopyStatus}
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
                 <div
                   className={[
@@ -787,16 +889,17 @@ export default function AuxiliarClinicoPage() {
                           </p>
                         ) : (
                           <div className={message.role === 'user' ? 'text-right' : 'text-left'}>
-                            <p className="text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                              {message.role === 'user' ? 'Voce' : 'RadiologIA'}
+                            <p className="text-[11px] tracking-wider text-slate-500 dark:text-slate-400">
+                              {message.role === 'user' ? 'Voce' : 'radiologIA'}
                             </p>
-                            <p className="mt-1 text-sm text-slate-700 dark:text-slate-200 whitespace-pre-line">
-                              {message.text}
+                            <p className="mt-1 text-sm text-slate-700 dark:text-slate-200">
+                              {renderChatText(message.text)}
                             </p>
                           </div>
                         )}
                       </div>
                     ))}
+                    {isChatSending ? renderTypingIndicator() : null}
                   </div>
                   <div className="flex flex-col gap-3 sm:flex-row">
                     <textarea

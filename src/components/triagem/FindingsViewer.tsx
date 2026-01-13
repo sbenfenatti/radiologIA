@@ -80,6 +80,7 @@ type FindingsViewerProps = {
   enableToothFusionPreview?: boolean;
   showModelToggles?: boolean;
   enableClickSelect?: boolean;
+  enableDebug?: boolean;
 };
 
 const LABEL_DICTIONARY: Record<string, LabelMeta> = {
@@ -259,7 +260,7 @@ const parseSvgPath = (path: string) => {
   return points.length >= 3 ? points : undefined;
 };
 
-const pointsFromFlat = (flat: number[]) => {
+const pointsFromFlat = (flat: number[]): number[][] | undefined => {
   if (flat.length < 6) {
     return undefined;
   }
@@ -274,7 +275,7 @@ const pointsFromFlat = (flat: number[]) => {
   return points.length >= 3 ? points : undefined;
 };
 
-const pointsFromPairs = (pairs: unknown[]) => {
+const pointsFromPairs = (pairs: unknown[]): number[][] | undefined => {
   if (
     pairs.length < 3 ||
     !pairs.every(
@@ -290,7 +291,9 @@ const pointsFromPairs = (pairs: unknown[]) => {
   return (pairs as number[][]).map((point) => [point[0], point[1]]);
 };
 
-const normalizeSegmentation = (segmentation?: RawFinding['segmentation']) => {
+const normalizeSegmentation = (
+  segmentation?: RawFinding['segmentation'],
+): number[][] | undefined => {
   if (!segmentation) {
     return undefined;
   }
@@ -803,6 +806,7 @@ export default function FindingsViewer({
   enableToothFusionPreview = false,
   showModelToggles = false,
   enableClickSelect = false,
+  enableDebug = false,
 }: FindingsViewerProps) {
   const [activeTab, setActiveTab] = useState<ViewerTab>(defaultTab);
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
@@ -817,6 +821,9 @@ export default function FindingsViewer({
   const [showLabels, setShowLabels] = useState(false);
   const [imageReady, setImageReady] = useState(false);
   const [zoomStyle, setZoomStyle] = useState({ scale: 1, tx: 0, ty: 0 });
+  const [debugEnabled, setDebugEnabled] = useState(enableDebug);
+  const [debugInfo, setDebugInfo] = useState<Record<string, unknown> | null>(null);
+  const [debugCopyStatus, setDebugCopyStatus] = useState<string | null>(null);
   const [coordTransform, setCoordTransform] = useState({
     yolo: { x: 1, y: 1, dx: 0, dy: 0 },
     detectron: { x: 1, y: 1, dx: 0, dy: 0 },
@@ -830,7 +837,37 @@ export default function FindingsViewer({
   const normalizedFindings = useMemo(() => normalizeFindings(findings), [findings]);
 
   useEffect(() => {
+    if (enableDebug) {
+      setDebugEnabled(true);
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('debug') === '1') {
+      setDebugEnabled(true);
+    }
+  }, [enableDebug]);
+
+  useEffect(() => {
     setImageReady(false);
+  }, [imageUrl]);
+
+  useEffect(() => {
+    const img = imageRef.current;
+    if (!img || !imageUrl) {
+      return;
+    }
+    const handleLoad = () => setImageReady(true);
+    const handleError = () => setImageReady(false);
+    if (img.complete && img.naturalWidth > 0) {
+      setImageReady(true);
+      return;
+    }
+    img.addEventListener('load', handleLoad);
+    img.addEventListener('error', handleError);
+    return () => {
+      img.removeEventListener('load', handleLoad);
+      img.removeEventListener('error', handleError);
+    };
   }, [imageUrl]);
 
   useEffect(() => {
@@ -962,6 +999,125 @@ export default function FindingsViewer({
     showPathology,
     showTreatments,
   ]);
+
+  useEffect(() => {
+    if (!debugEnabled) {
+      setDebugInfo(null);
+      return;
+    }
+    const updateDebug = () => {
+      const img = imageRef.current;
+      const canvas = canvasRef.current;
+      const stage = stageRef.current;
+      const metrics = img ? getImageRenderMetrics(img) : null;
+      const bySource = { yolo: 0, detectron: 0, other: 0 };
+      const byCategory: Record<string, number> = {};
+      let bboxCount = 0;
+      let segmentationCount = 0;
+      normalizedFindings.forEach((finding) => {
+        bySource[finding.sourceKind] += 1;
+        byCategory[finding.category] = (byCategory[finding.category] ?? 0) + 1;
+        if (finding.segmentation?.length) {
+          segmentationCount += 1;
+        }
+        if (finding.bbox?.length === 4 || getFindingBbox(finding)) {
+          bboxCount += 1;
+        }
+      });
+      const sample = filteredFindings[0] ?? normalizedFindings[0];
+      setDebugInfo({
+        imageReady,
+        imageUrl: imageUrl ?? null,
+        image: img
+          ? {
+              naturalWidth: img.naturalWidth,
+              naturalHeight: img.naturalHeight,
+              clientWidth: img.clientWidth,
+              clientHeight: img.clientHeight,
+            }
+          : null,
+        stage: stage ? { width: stage.clientWidth, height: stage.clientHeight } : null,
+        canvas: canvas ? { width: canvas.width, height: canvas.height } : null,
+        metrics,
+        zoom: zoomStyle,
+        coordTransform,
+        filters: {
+          showYolo,
+          showDetectron,
+          showOther,
+          showStructures,
+          showTeeth,
+          showPathology,
+          showTreatments,
+        },
+        counts: {
+          total: normalizedFindings.length,
+          filtered: filteredFindings.length,
+          bboxCount,
+          segmentationCount,
+          bySource,
+          byCategory,
+        },
+        sample: sample
+          ? {
+              label: sample.displayLabel ?? sample.label,
+              sourceKind: sample.sourceKind,
+              category: sample.category,
+              bbox: getFindingBbox(sample),
+              segmentationPoints: sample.segmentation?.length ?? 0,
+            }
+          : null,
+      });
+    };
+    updateDebug();
+    const handleResize = () => updateDebug();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [
+    debugEnabled,
+    imageReady,
+    imageUrl,
+    normalizedFindings,
+    filteredFindings,
+    zoomStyle,
+    coordTransform,
+    showYolo,
+    showDetectron,
+    showOther,
+    showStructures,
+    showTeeth,
+    showPathology,
+    showTreatments,
+  ]);
+
+  const handleCopyDebug = async () => {
+    if (!debugInfo) {
+      setDebugCopyStatus('Sem dados.');
+      window.setTimeout(() => setDebugCopyStatus(null), 2000);
+      return;
+    }
+    const payload = {
+      generatedAt: new Date().toISOString(),
+      ...debugInfo,
+    };
+    const text = JSON.stringify(payload, null, 2);
+    try {
+      await navigator.clipboard.writeText(text);
+      setDebugCopyStatus('Debug copiado.');
+    } catch (error) {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(textarea);
+      setDebugCopyStatus(ok ? 'Debug copiado.' : 'Falha ao copiar.');
+    }
+    window.setTimeout(() => setDebugCopyStatus(null), 2000);
+  };
 
   const tabItems = useMemo(() => {
     const targetCategory =
@@ -1346,6 +1502,14 @@ export default function FindingsViewer({
         ctx.globalAlpha = 1;
         ctx.shadowBlur = 0;
       });
+
+      if (debugEnabled) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(248, 113, 113, 0.9)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(0.5, 0.5, metrics.renderWidth - 1, metrics.renderHeight - 1);
+        ctx.restore();
+      }
     };
 
     draw();
@@ -1518,6 +1682,70 @@ export default function FindingsViewer({
                   <div className="flex items-center gap-3 rounded-full bg-white/80 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-brand-blue shadow-lg dark:bg-white/10 dark:text-white">
                     <span className="h-4 w-4 animate-spin rounded-full border-2 border-brand-green border-t-transparent"></span>
                     {loadingLabel}
+                  </div>
+                </div>
+              ) : null}
+              {debugEnabled ? (
+                <div className="absolute bottom-4 left-4 max-w-[340px] rounded-2xl border border-white/40 bg-white/90 px-3 py-2 text-[10px] text-slate-700 shadow-lg dark:border-white/10 dark:bg-slate-900/80 dark:text-slate-200">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-brand-blue dark:text-white">
+                      Debug
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleCopyDebug}
+                      className="rounded-full border border-brand-blue/40 px-2 py-0.5 text-[10px] font-semibold text-brand-blue hover:bg-brand-blue/10 dark:border-white/20 dark:text-white/80 dark:hover:bg-white/10"
+                    >
+                      Copiar
+                    </button>
+                  </div>
+                  <div className="mt-2 space-y-1 font-mono text-[10px] leading-4">
+                    <div>imageReady: {debugInfo?.imageReady ? 'true' : 'false'}</div>
+                    <div>
+                      image: {debugInfo?.image && typeof debugInfo.image === 'object'
+                        ? `${(debugInfo.image as { clientWidth: number; clientHeight: number }).clientWidth}x${(debugInfo.image as { clientWidth: number; clientHeight: number }).clientHeight}`
+                        : 'n/a'}
+                    </div>
+                    <div>
+                      natural: {debugInfo?.image && typeof debugInfo.image === 'object'
+                        ? `${(debugInfo.image as { naturalWidth: number; naturalHeight: number }).naturalWidth}x${(debugInfo.image as { naturalWidth: number; naturalHeight: number }).naturalHeight}`
+                        : 'n/a'}
+                    </div>
+                    <div>
+                      render: {debugInfo?.metrics && typeof debugInfo.metrics === 'object'
+                        ? `${(debugInfo.metrics as { renderWidth: number; renderHeight: number }).renderWidth}x${(debugInfo.metrics as { renderWidth: number; renderHeight: number }).renderHeight}`
+                        : 'n/a'}
+                    </div>
+                    <div>
+                      offset: {debugInfo?.metrics && typeof debugInfo.metrics === 'object'
+                        ? `${(debugInfo.metrics as { offsetX: number; offsetY: number }).offsetX.toFixed(1)},${(debugInfo.metrics as { offsetX: number; offsetY: number }).offsetY.toFixed(1)}`
+                        : 'n/a'}
+                    </div>
+                    <div>
+                      canvas: {debugInfo?.canvas && typeof debugInfo.canvas === 'object'
+                        ? `${(debugInfo.canvas as { width: number; height: number }).width}x${(debugInfo.canvas as { width: number; height: number }).height}`
+                        : 'n/a'}
+                    </div>
+                    <div>
+                      findings: {debugInfo?.counts && typeof debugInfo.counts === 'object'
+                        ? `${(debugInfo.counts as { filtered: number; total: number }).filtered}/${(debugInfo.counts as { filtered: number; total: number }).total}`
+                        : 'n/a'}
+                    </div>
+                    <div>
+                      seg/bbox: {debugInfo?.counts && typeof debugInfo.counts === 'object'
+                        ? `${(debugInfo.counts as { segmentationCount: number; bboxCount: number }).segmentationCount}/${(debugInfo.counts as { segmentationCount: number; bboxCount: number }).bboxCount}`
+                        : 'n/a'}
+                    </div>
+                    {debugInfo?.sample && typeof debugInfo.sample === 'object' ? (
+                      <div>
+                        sample: {(debugInfo.sample as { label: string }).label}
+                      </div>
+                    ) : null}
+                    {debugCopyStatus ? (
+                      <div className="text-[10px] uppercase tracking-wider text-brand-green">
+                        {debugCopyStatus}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               ) : null}

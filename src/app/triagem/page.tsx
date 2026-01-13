@@ -1420,10 +1420,6 @@ export default function TriagemPage() {
       setSummaryError('Analise ao menos um caso para gerar o resumo.');
       return;
     }
-    if (!baseApiUrl) {
-      setSummaryError('Configure NEXT_PUBLIC_MODAL_API_URL para usar o backend.');
-      return;
-    }
     setSummary('');
     setSummaryError(null);
     setIsSummaryLoading(true);
@@ -1437,14 +1433,25 @@ export default function TriagemPage() {
           },
         ],
       };
-      const response = await fetch(`${baseApiUrl}/chat`, {
+      const response = await fetch('/api/gemini', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
       if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || 'Falha ao gerar resumo.');
+        let errorMessage = 'Falha ao gerar resumo.';
+        try {
+          const data = await response.json();
+          if (typeof data?.error === 'string' && data.error.trim()) {
+            errorMessage = data.error;
+          }
+        } catch (error) {
+          const text = await response.text();
+          if (text) {
+            errorMessage = text;
+          }
+        }
+        throw new Error(errorMessage);
       }
       const data = await response.json();
       setSummary(data.response || 'Resumo indisponivel.');

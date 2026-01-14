@@ -81,6 +81,8 @@ type FindingsViewerProps = {
   showModelToggles?: boolean;
   enableClickSelect?: boolean;
   enableDebug?: boolean;
+  showTeethToggle?: boolean;
+  structureLabel?: string;
 };
 
 const LABEL_DICTIONARY: Record<string, LabelMeta> = {
@@ -678,7 +680,7 @@ const getFindingStyle = (finding: NormalizedFinding) => {
     return { stroke: '#f59e0b', fill: '#f59e0b' };
   }
   if (canonical === 'polpa') {
-    return { stroke: '#a855f7', fill: '#a855f7' };
+    return { stroke: '#009739', fill: '#009739' };
   }
   if (finding.category === 'structure') {
     return { stroke: '#38bdf8', fill: '#38bdf8' };
@@ -792,6 +794,14 @@ const getImageRenderMetrics = (img: HTMLImageElement) => {
   };
 };
 
+type DebugSummary = {
+  topLabels: { label: string; count: number }[];
+  pathologyBySource: Record<string, number>;
+  treatmentBySource: Record<string, number>;
+  carieBySource: Record<string, number>;
+  restauracaoBySource: Record<string, number>;
+};
+
 export default function FindingsViewer({
   imageUrl,
   findings,
@@ -807,6 +817,8 @@ export default function FindingsViewer({
   showModelToggles = false,
   enableClickSelect = false,
   enableDebug = false,
+  showTeethToggle = true,
+  structureLabel = 'Estruturas',
 }: FindingsViewerProps) {
   const [activeTab, setActiveTab] = useState<ViewerTab>(defaultTab);
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
@@ -820,6 +832,7 @@ export default function FindingsViewer({
   const [showTreatments, setShowTreatments] = useState(true);
   const [showLabels, setShowLabels] = useState(false);
   const [imageReady, setImageReady] = useState(false);
+  const [renderMetrics, setRenderMetrics] = useState<ReturnType<typeof getImageRenderMetrics> | null>(null);
   const [zoomStyle, setZoomStyle] = useState({ scale: 1, tx: 0, ty: 0 });
   const [debugEnabled, setDebugEnabled] = useState(enableDebug);
   const [debugInfo, setDebugInfo] = useState<Record<string, unknown> | null>(null);
@@ -842,10 +855,25 @@ export default function FindingsViewer({
       return;
     }
     const params = new URLSearchParams(window.location.search);
-    if (params.get('debug') === '1') {
+    const debugParam = params.get('debug');
+    if (debugParam === '1' || debugParam === 'true' || params.has('debug') || params.has('debug1')) {
       setDebugEnabled(true);
     }
   }, [enableDebug]);
+
+  useEffect(() => {
+    const img = imageRef.current;
+    if (!imageReady || !img) {
+      setRenderMetrics(null);
+      return;
+    }
+    const updateMetrics = () => {
+      setRenderMetrics(getImageRenderMetrics(img));
+    };
+    updateMetrics();
+    window.addEventListener('resize', updateMetrics);
+    return () => window.removeEventListener('resize', updateMetrics);
+  }, [imageReady, imageUrl]);
 
   useEffect(() => {
     setImageReady(false);
@@ -1012,11 +1040,31 @@ export default function FindingsViewer({
       const metrics = img ? getImageRenderMetrics(img) : null;
       const bySource = { yolo: 0, detectron: 0, other: 0 };
       const byCategory: Record<string, number> = {};
+      const labelCounts = new Map<string, number>();
+      const pathologyBySource = { yolo: 0, detectron: 0, other: 0 };
+      const treatmentBySource = { yolo: 0, detectron: 0, other: 0 };
+      const carieBySource = { yolo: 0, detectron: 0, other: 0 };
+      const restauracaoBySource = { yolo: 0, detectron: 0, other: 0 };
       let bboxCount = 0;
       let segmentationCount = 0;
       normalizedFindings.forEach((finding) => {
         bySource[finding.sourceKind] += 1;
         byCategory[finding.category] = (byCategory[finding.category] ?? 0) + 1;
+        const labelKey = finding.displayLabel ?? finding.label;
+        labelCounts.set(labelKey, (labelCounts.get(labelKey) ?? 0) + 1);
+        if (finding.category === 'pathology') {
+          pathologyBySource[finding.sourceKind] += 1;
+        }
+        if (finding.category === 'treatment') {
+          treatmentBySource[finding.sourceKind] += 1;
+        }
+        const canonical = (finding.canonicalLabel ?? finding.label).toLowerCase();
+        if (canonical.includes('carie')) {
+          carieBySource[finding.sourceKind] += 1;
+        }
+        if (canonical.includes('restauracao')) {
+          restauracaoBySource[finding.sourceKind] += 1;
+        }
         if (finding.segmentation?.length) {
           segmentationCount += 1;
         }
@@ -1024,6 +1072,10 @@ export default function FindingsViewer({
           bboxCount += 1;
         }
       });
+      const topLabels = Array.from(labelCounts.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 8)
+        .map(([label, count]) => ({ label, count }));
       const sample = filteredFindings[0] ?? normalizedFindings[0];
       setDebugInfo({
         imageReady,
@@ -1057,6 +1109,13 @@ export default function FindingsViewer({
           segmentationCount,
           bySource,
           byCategory,
+        },
+        summary: {
+          topLabels,
+          pathologyBySource,
+          treatmentBySource,
+          carieBySource,
+          restauracaoBySource,
         },
         sample: sample
           ? {
@@ -1542,6 +1601,7 @@ export default function FindingsViewer({
   ]);
 
   const emptyState = !imageUrl;
+  const debugSummary = debugInfo?.summary as DebugSummary | undefined;
 
   return (
     <div
@@ -1601,19 +1661,21 @@ export default function FindingsViewer({
         >
           Tratamentos
         </button>
-        <button
-          type="button"
-          className={toggleButtonClass(showTeeth)}
-          onClick={() => setShowTeeth((prev) => !prev)}
-        >
-          Dentes
-        </button>
+        {showTeethToggle ? (
+          <button
+            type="button"
+            className={toggleButtonClass(showTeeth)}
+            onClick={() => setShowTeeth((prev) => !prev)}
+          >
+            Dentes
+          </button>
+        ) : null}
         <button
           type="button"
           className={toggleButtonClass(showStructures)}
           onClick={() => setShowStructures((prev) => !prev)}
         >
-          Estruturas
+          {structureLabel}
         </button>
         <button
           type="button"
@@ -1643,7 +1705,9 @@ export default function FindingsViewer({
                 className="max-h-[560px] w-full object-contain image-raw"
                 style={{
                   transform: `translate(${zoomStyle.tx}px, ${zoomStyle.ty}px) scale(${zoomStyle.scale})`,
-                  transformOrigin: 'top left',
+                  transformOrigin: renderMetrics
+                    ? `${renderMetrics.offsetX}px ${renderMetrics.offsetY}px`
+                    : 'top left',
                 }}
               />
               <canvas
@@ -1736,6 +1800,16 @@ export default function FindingsViewer({
                         ? `${(debugInfo.counts as { segmentationCount: number; bboxCount: number }).segmentationCount}/${(debugInfo.counts as { segmentationCount: number; bboxCount: number }).bboxCount}`
                         : 'n/a'}
                     </div>
+                    {debugSummary ? (
+                      <div>
+                        carie Y/D/O: {debugSummary.carieBySource.yolo}/{debugSummary.carieBySource.detectron}/{debugSummary.carieBySource.other}
+                      </div>
+                    ) : null}
+                    {debugSummary ? (
+                      <div>
+                        restauracao Y/D/O: {debugSummary.restauracaoBySource.yolo}/{debugSummary.restauracaoBySource.detectron}/{debugSummary.restauracaoBySource.other}
+                      </div>
+                    ) : null}
                     {debugInfo?.sample && typeof debugInfo.sample === 'object' ? (
                       <div>
                         sample: {(debugInfo.sample as { label: string }).label}

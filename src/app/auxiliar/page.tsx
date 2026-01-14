@@ -3,8 +3,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, LogOut, Moon, Sun, UserRound } from 'lucide-react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useSupabaseUser } from '@/hooks/use-supabase-user';
+import { useSessionExpiry } from '@/hooks/use-session-expiry';
 import { supabase } from '@/lib/supabase/client';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import FindingsViewer, { normalizeFindings, type RawFinding } from '@/components/triagem/FindingsViewer';
@@ -75,19 +76,38 @@ export default function AuxiliarClinicoPage() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [findings, setFindings] = useState<Finding[]>([]);
-  const [copyStatus, setCopyStatus] = useState<string | null>(null);
-  const [chatCopyStatus, setChatCopyStatus] = useState<string | null>(null);
-  const [lastChatExchange, setLastChatExchange] = useState<{ request: unknown; response?: unknown } | null>(null);
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([
     { role: 'system', text: 'Aguardando contexto da imagem.' },
   ]);
   const [chatInput, setChatInput] = useState('');
   const [isChatSending, setIsChatSending] = useState(false);
+  const [copyStatus, setCopyStatus] = useState<string | null>(null);
+  const [chatCopyStatus, setChatCopyStatus] = useState<string | null>(null);
+  const [lastChatExchange, setLastChatExchange] = useState<{ request: unknown; response?: unknown } | null>(null);
   const isVisitor = hasTokenAccess && !user;
   const displayName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Usuário';
   const profileHref = isVisitor ? '/perfil/visitante' : '/perfil';
   const profileLabel = isVisitor ? 'Perfil (Visitante)' : 'Perfil';
+  const isAuthenticated = Boolean(user || hasTokenAccess);
+  const authIdentity = user?.id ?? (hasTokenAccess ? 'visitor' : null);
   const baseApiUrl = process.env.NEXT_PUBLIC_MODAL_API_URL ?? '';
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const debugEnabled = useMemo(() => {
+    if (pathname?.includes('/debug')) {
+      return true;
+    }
+    if (!searchParams) {
+      return false;
+    }
+    const debugParam = searchParams.get('debug');
+    return (
+      debugParam === '1' ||
+      debugParam === 'true' ||
+      searchParams.has('debug') ||
+      searchParams.has('debug1')
+    );
+  }, [pathname, searchParams]);
 
   const normalizeImageFile = (file: File) =>
     new Promise<File>((resolve, reject) => {
@@ -355,9 +375,14 @@ export default function AuxiliarClinicoPage() {
         console.error(error);
       }
       localStorage.removeItem('tokenAuth');
+      localStorage.removeItem('radiologia.auth.start');
+      localStorage.removeItem('radiologia.auth.last');
+      localStorage.removeItem('radiologia.auth.id');
       router.push('/');
     }
   };
+
+  useSessionExpiry({ isActive: isAuthenticated, identity: authIdentity, onExpire: handleLogout });
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -449,6 +474,9 @@ export default function AuxiliarClinicoPage() {
   };
 
   const handleCopyAnalysisJson = async () => {
+    if (!debugEnabled) {
+      return;
+    }
     if (findings.length === 0) {
       setCopyStatus('Sem analise para copiar.');
       window.setTimeout(() => setCopyStatus(null), 2000);
@@ -498,8 +526,9 @@ export default function AuxiliarClinicoPage() {
           .filter((message) => message.role !== 'system')
           .map((message) => ({ role: message.role, text: message.text })),
       };
-      setLastChatExchange({ request: payload });
-
+      if (debugEnabled) {
+        setLastChatExchange({ request: payload });
+      }
       const response = await fetch('/api/gemini', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -523,11 +552,15 @@ export default function AuxiliarClinicoPage() {
       }
 
       const data = await response.json();
-      setLastChatExchange({ request: payload, response: data });
+      if (debugEnabled) {
+        setLastChatExchange({ request: payload, response: data });
+      }
       setChatHistory((prev) => [...prev, { role: 'model', text: data.response }]);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Falha no chat.';
-      setLastChatExchange((prev) => (prev ? { ...prev, response: { error: message } } : null));
+      if (debugEnabled) {
+        setLastChatExchange((prev) => (prev ? { ...prev, response: { error: message } } : null));
+      }
       setChatHistory((prev) => [
         ...prev,
         { role: 'system', text: `Erro no chat: ${message}` },
@@ -538,6 +571,9 @@ export default function AuxiliarClinicoPage() {
   };
 
   const handleCopyChatJson = async () => {
+    if (!debugEnabled) {
+      return;
+    }
     if (!lastChatExchange) {
       setChatCopyStatus('Nada para copiar.');
       window.setTimeout(() => setChatCopyStatus(null), 2000);
@@ -690,17 +726,21 @@ export default function AuxiliarClinicoPage() {
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={handleCopyChatJson}
-                    className="rounded-full border border-brand-blue/40 px-4 py-2 text-xs font-semibold text-brand-blue shadow-md transition-all hover:bg-brand-blue/10 dark:border-white/20 dark:text-white/80 dark:hover:bg-white/10"
-                  >
-                    Copiar JSON
-                  </button>
-                  {chatCopyStatus ? (
-                    <span className="text-[10px] uppercase tracking-wider text-brand-green">
-                      {chatCopyStatus}
-                    </span>
+                  {debugEnabled ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={handleCopyChatJson}
+                        className="rounded-full border border-brand-blue/40 px-4 py-2 text-xs font-semibold text-brand-blue shadow-md transition-all hover:bg-brand-blue/10 dark:border-white/20 dark:text-white/80 dark:hover:bg-white/10"
+                      >
+                        Copiar JSON
+                      </button>
+                      {chatCopyStatus ? (
+                        <span className="text-[10px] uppercase tracking-wider text-brand-green">
+                          {chatCopyStatus}
+                        </span>
+                      ) : null}
+                    </>
                   ) : null}
                 </div>
               </div>
@@ -807,6 +847,8 @@ export default function AuxiliarClinicoPage() {
                   enableToothFusionPreview
                   enableClickSelect
                   showList={false}
+                  showTeethToggle={false}
+                  structureLabel="Dentes"
                   toolbar={
                     <>
                       <label className="rounded-full bg-brand-blue px-4 py-2 text-xs font-semibold text-white shadow-md cursor-pointer">
@@ -821,17 +863,21 @@ export default function AuxiliarClinicoPage() {
                       >
                         {isAnalyzing ? 'Analisando...' : 'Analisar'}
                       </button>
-                      <button
-                        type="button"
-                        onClick={handleCopyAnalysisJson}
-                        className="rounded-full border border-brand-blue/40 px-4 py-2 text-xs font-semibold text-brand-blue shadow-md transition-all hover:bg-brand-blue/10 dark:border-white/20 dark:text-white/80 dark:hover:bg-white/10"
-                      >
-                        Copiar JSON
-                      </button>
-                      {copyStatus ? (
-                        <span className="text-[10px] uppercase tracking-wider text-brand-green">
-                          {copyStatus}
-                        </span>
+                      {debugEnabled ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={handleCopyAnalysisJson}
+                            className="rounded-full border border-brand-blue/40 px-4 py-2 text-xs font-semibold text-brand-blue shadow-md transition-all hover:bg-brand-blue/10 dark:border-white/20 dark:text-white/80 dark:hover:bg-white/10"
+                          >
+                            Copiar JSON
+                          </button>
+                          {copyStatus ? (
+                            <span className="text-[10px] uppercase tracking-wider text-brand-green">
+                              {copyStatus}
+                            </span>
+                          ) : null}
+                        </>
                       ) : null}
                     </>
                   }
@@ -853,13 +899,22 @@ export default function AuxiliarClinicoPage() {
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={handleCopyChatJson}
-                      className="rounded-full border border-brand-blue/40 px-4 py-2 text-xs font-semibold text-brand-blue shadow-md transition-all hover:bg-brand-blue/10 dark:border-white/20 dark:text-white/80 dark:hover:bg-white/10"
-                    >
-                      Copiar JSON
-                    </button>
+                    {debugEnabled ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={handleCopyChatJson}
+                          className="rounded-full border border-brand-blue/40 px-4 py-2 text-xs font-semibold text-brand-blue shadow-md transition-all hover:bg-brand-blue/10 dark:border-white/20 dark:text-white/80 dark:hover:bg-white/10"
+                        >
+                          Copiar JSON
+                        </button>
+                        {chatCopyStatus ? (
+                          <span className="text-[10px] uppercase tracking-wider text-brand-green">
+                            {chatCopyStatus}
+                          </span>
+                        ) : null}
+                      </>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => setIsChatExpanded((prev) => !prev)}
@@ -867,11 +922,6 @@ export default function AuxiliarClinicoPage() {
                     >
                       {isChatExpanded ? 'Recolher chat' : 'Expandir chat'}
                     </button>
-                    {chatCopyStatus ? (
-                      <span className="text-[10px] uppercase tracking-wider text-brand-green">
-                        {chatCopyStatus}
-                      </span>
-                    ) : null}
                   </div>
                 </div>
                 <div

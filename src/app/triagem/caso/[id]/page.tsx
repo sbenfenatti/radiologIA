@@ -4,6 +4,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, FileSearch } from 'lucide-react';
 import { useParams, useRouter } from 'next/navigation';
 import FindingsViewer from '@/components/triagem/FindingsViewer';
+import { useSupabaseUser } from '@/hooks/use-supabase-user';
+import { useSessionExpiry } from '@/hooks/use-session-expiry';
+import { supabase } from '@/lib/supabase/client';
 
 type FindingCategory =
   | 'structure'
@@ -689,18 +692,66 @@ const getSourceKind = (finding: Finding) => {
 
 export default function TriagemCasoPage() {
   const router = useRouter();
+  const { user, isLoading } = useSupabaseUser();
   const params = useParams();
   const caseId = Array.isArray(params?.id) ? params?.id[0] : params?.id;
   const batchUrl =
     process.env.NEXT_PUBLIC_TRIAGEM_BATCH_URL ?? '/batch_test/triagem_batch_results.json';
   const batchImageBase =
     process.env.NEXT_PUBLIC_TRIAGEM_BATCH_IMAGE_BASE ?? '/batch_test/';
+  const [tokenChecked, setTokenChecked] = useState(false);
+  const [hasTokenAccess, setHasTokenAccess] = useState(false);
   const [caseData, setCaseData] = useState<StoredCase | null>(null);
   const [loadState, setLoadState] = useState<'idle' | 'loading' | 'error'>('idle');
   const [loadError, setLoadError] = useState<string | null>(null);
+  const isAuthenticated = Boolean(user || hasTokenAccess);
+  const authIdentity = user?.id ?? (hasTokenAccess ? 'visitor' : null);
 
   useEffect(() => {
-    if (!caseId) {
+    let isActive = true;
+    const verifyTokenAccess = async () => {
+      try {
+        const response = await fetch('/api/token-session', {
+          method: 'GET',
+          cache: 'no-store',
+        });
+        if (!isActive) {
+          return;
+        }
+        if (!response.ok) {
+          localStorage.removeItem('tokenAuth');
+          setHasTokenAccess(false);
+          return;
+        }
+        setHasTokenAccess(true);
+      } catch (error) {
+        console.error(error);
+        if (isActive) {
+          setHasTokenAccess(false);
+        }
+      } finally {
+        if (isActive) {
+          setTokenChecked(true);
+        }
+      }
+    };
+    verifyTokenAccess();
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isLoading || !tokenChecked) {
+      return;
+    }
+    if (!user && !hasTokenAccess) {
+      router.replace('/');
+    }
+  }, [isLoading, tokenChecked, user, hasTokenAccess, router]);
+
+  useEffect(() => {
+    if (!caseId || !tokenChecked || !isAuthenticated) {
       return;
     }
     let isActive = true;
@@ -780,7 +831,28 @@ export default function TriagemCasoPage() {
     return () => {
       isActive = false;
     };
-  }, [caseId, batchUrl, batchImageBase]);
+  }, [caseId, batchUrl, batchImageBase, tokenChecked, isAuthenticated]);
+
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch (error) {
+      console.error(error);
+    } finally {
+      try {
+        await fetch('/api/token-session', { method: 'DELETE' });
+      } catch (error) {
+        console.error(error);
+      }
+      localStorage.removeItem('tokenAuth');
+      localStorage.removeItem('radiologia.auth.start');
+      localStorage.removeItem('radiologia.auth.last');
+      localStorage.removeItem('radiologia.auth.id');
+      router.push('/');
+    }
+  };
+
+  useSessionExpiry({ isActive: isAuthenticated, identity: authIdentity, onExpire: handleLogout });
 
   const findings = useMemo(() => {
     if (!caseData) {

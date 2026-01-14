@@ -6,6 +6,7 @@ import { ScanSearch, BrainCircuit, Moon, Sun, UserRound, LogOut } from 'lucide-r
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useSupabaseUser } from '@/hooks/use-supabase-user';
+import { useSessionExpiry } from '@/hooks/use-session-expiry';
 import { supabase } from '@/lib/supabase/client';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
@@ -55,6 +56,8 @@ export default function PresentationPage() {
     const displayName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Usuário';
     const profileHref = isVisitor ? '/perfil/visitante' : '/perfil';
     const profileLabel = isVisitor ? 'Perfil (Visitante)' : 'Perfil';
+    const isAuthenticated = Boolean(user || hasTokenAccess);
+    const authIdentity = user?.id ?? (hasTokenAccess ? 'visitor' : null);
 
     useEffect(() => {
         let isActive = true;
@@ -135,9 +138,14 @@ export default function PresentationPage() {
                 console.error(error);
             }
             localStorage.removeItem('tokenAuth');
+            localStorage.removeItem('radiologia.auth.start');
+            localStorage.removeItem('radiologia.auth.last');
+            localStorage.removeItem('radiologia.auth.id');
             router.push('/');
         }
     };
+
+    useSessionExpiry({ isActive: isAuthenticated, identity: authIdentity, onExpire: handleLogout });
 
     if (isLoading || !tokenChecked) {
         return (

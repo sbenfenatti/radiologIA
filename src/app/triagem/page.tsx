@@ -15,6 +15,7 @@ import {
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useSupabaseUser } from '@/hooks/use-supabase-user';
+import { useSessionExpiry } from '@/hooks/use-session-expiry';
 import { supabase } from '@/lib/supabase/client';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
@@ -256,6 +257,13 @@ const AGE_BUCKETS = [
   { label: '46-55', min: 46, max: 55 },
   { label: '56+', min: 56, max: null },
 ];
+
+let triagemCache: {
+  cases: TriageCase[];
+  hideAnatomy: boolean;
+  normalizeToothLabel: boolean;
+  identity: string | null;
+} | null = null;
 
 const SEVERITY_RULES = [
   {
@@ -775,6 +783,8 @@ export default function TriagemPage() {
   const displayName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Usuario';
   const profileHref = isVisitor ? '/perfil/visitante' : '/perfil';
   const profileLabel = isVisitor ? 'Perfil (Visitante)' : 'Perfil';
+  const isAuthenticated = Boolean(user || hasTokenAccess);
+  const authIdentity = user?.id ?? (hasTokenAccess ? 'visitor' : null);
   const baseApiUrl = process.env.NEXT_PUBLIC_MODAL_API_URL ?? '';
   const autoBatchUrl =
     process.env.NEXT_PUBLIC_TRIAGEM_BATCH_URL ?? '/batch_test/triagem_batch_results.json';
@@ -782,6 +792,39 @@ export default function TriagemPage() {
     process.env.NEXT_PUBLIC_TRIAGEM_BATCH_IMAGE_BASE ?? '/batch_test/';
   const uploadAttempted = uploadPassword.trim().length > 0;
   const uploadUnlocked = false;
+
+  useEffect(() => {
+    if (!authIdentity) {
+      return;
+    }
+    if (
+      triagemCache &&
+      triagemCache.identity === authIdentity &&
+      cases.length === 0
+    ) {
+      setCases(triagemCache.cases);
+      setHideAnatomy(triagemCache.hideAnatomy);
+      setNormalizeToothLabel(triagemCache.normalizeToothLabel);
+    }
+  }, [authIdentity]);
+
+  useEffect(() => {
+    if (!authIdentity) {
+      triagemCache = null;
+      return;
+    }
+    if (cases.length === 0) {
+      triagemCache = null;
+      return;
+    }
+    triagemCache = { cases, hideAnatomy, normalizeToothLabel, identity: authIdentity };
+  }, [cases, hideAnatomy, normalizeToothLabel, authIdentity]);
+
+  useEffect(() => {
+    if (triagemCache && authIdentity && triagemCache.identity !== authIdentity) {
+      triagemCache = null;
+    }
+  }, [authIdentity]);
 
   useEffect(() => {
     let isActive = true;
@@ -852,6 +895,9 @@ export default function TriagemPage() {
 
   useEffect(() => {
     return () => {
+      if (triagemCache && triagemCache.cases.length > 0 && triagemCache.identity === authIdentity) {
+        return;
+      }
       casesRef.current.forEach((caseItem) => {
         revokeObjectUrl(caseItem.previewUrl);
       });
@@ -889,9 +935,15 @@ export default function TriagemPage() {
         console.error(error);
       }
       localStorage.removeItem('tokenAuth');
+      localStorage.removeItem('radiologia.auth.start');
+      localStorage.removeItem('radiologia.auth.last');
+      localStorage.removeItem('radiologia.auth.id');
+      triagemCache = null;
       router.push('/');
     }
   };
+
+  useSessionExpiry({ isActive: isAuthenticated, identity: authIdentity, onExpire: handleLogout });
 
   const buildInsights = (caseItem: TriageCase): CaseInsight => {
     if (caseItem.status !== 'done') {
@@ -1750,7 +1802,7 @@ export default function TriagemPage() {
             </div>
 
             <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              <span className="rounded-full bg-red-200 px-2 py-1 text-[10px] font-semibold text-red-700">
+              <span className="rounded-full bg-[#E60026] px-2 py-1 text-[10px] font-semibold text-white">
                 Alta {totals.severityCounts.Alta}
               </span>
               <span className="rounded-full bg-brand-yellow/30 px-2 py-1 text-[10px] font-semibold text-brand-blue">
@@ -1764,7 +1816,7 @@ export default function TriagemPage() {
             <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/60 dark:bg-white/10">
               <div className="flex h-full w-full">
                 <div
-                  className="h-full bg-red-400"
+                  className="h-full bg-[#E60026]"
                   style={{
                     width: `${percentOf(totals.severityCounts.Alta, severityTotal)}%`,
                   }}
@@ -1977,9 +2029,11 @@ export default function TriagemPage() {
                   </p>
                 ) : (
                   priorityCases.slice(0, 6).map((caseItem) => (
-                    <div
+                    <button
+                      type="button"
                       key={caseItem.id}
-                      className="flex items-center justify-between gap-2 rounded-xl border border-white/40 bg-white/60 px-3 py-2 text-xs text-slate-600 dark:border-white/10 dark:bg-slate-900/40 dark:text-slate-200"
+                      onClick={() => handleOpenCase(caseItem)}
+                      className="flex w-full items-center justify-between gap-2 rounded-xl border border-white/40 bg-white/60 px-3 py-2 text-left text-xs text-slate-600 transition-colors hover:border-brand-blue/40 hover:bg-white/80 dark:border-white/10 dark:bg-slate-900/40 dark:text-slate-200 dark:hover:bg-slate-900/60"
                     >
                       <div>
                         <p className="font-semibold text-brand-blue dark:text-white">
@@ -1995,7 +2049,7 @@ export default function TriagemPage() {
                         className={[
                           'rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider',
                           caseItem.insights.severity === 'Alta'
-                            ? 'bg-red-200 text-red-600'
+                            ? 'bg-[#E60026] text-white'
                             : caseItem.insights.severity === 'Media'
                               ? 'bg-brand-yellow/30 text-brand-blue'
                               : 'bg-brand-green/20 text-brand-green',
@@ -2003,7 +2057,7 @@ export default function TriagemPage() {
                       >
                         {caseItem.insights.severity}
                       </span>
-                    </div>
+                    </button>
                   ))
                 )}
               </div>

@@ -9,6 +9,7 @@ import { useSupabaseUser } from '@/hooks/use-supabase-user';
 import { useSessionExpiry } from '@/hooks/use-session-expiry';
 import { supabase } from '@/lib/supabase/client';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import CreditFooter from '@/components/CreditFooter';
 
 const GlassCard = ({ children, className = '' }: { children: React.ReactNode, className?: string }) => (
     <div className={`bg-white/70 dark:bg-white/5 border border-white/50 dark:border-white/10 rounded-2xl p-6 backdrop-blur-md group ${className}`}>
@@ -266,6 +267,7 @@ export default function PresentationPage() {
                     </Link>
                 </motion.div>
             </div>
+            <CreditFooter className="mt-8 pb-6" />
         </div>
     );
 }

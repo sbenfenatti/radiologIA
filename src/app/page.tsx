@@ -29,6 +29,7 @@ import {
 import { cn } from '@/lib/utils';
 import { supabase } from '@/lib/supabase/client';
 import { useSupabaseUser } from '@/hooks/use-supabase-user';
+import CreditFooter from '@/components/CreditFooter';
 
 const loginSchema = z.object({
   email: z.string().email({ message: 'Por favor, insira um e-mail válido.' }),
@@ -216,7 +217,7 @@ export default function LoginPage() {
                         <input
                           {...field}
                           type="email"
-                          placeholder="dr.sergio@radiologia.com.br"
+                          placeholder="email@radiologIA.com"
                           className="w-full pl-10 pr-4 py-3 text-base rounded-lg glass-input focus:ring-1 focus:ring-brand-green/50 focus:border-brand-green outline-none transition-all placeholder-gray-400 dark:placeholder-gray-500 text-brand-blue dark:text-white font-medium"
                           required
                         />
@@ -329,6 +330,7 @@ export default function LoginPage() {
               </div>
             </div>
           )}
+          <CreditFooter className="mt-6" />
         </div>
       </div>
     </div>

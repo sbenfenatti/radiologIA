@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import CreditFooter from '@/components/CreditFooter';
 
 type Rect = {
   x: number;
@@ -414,6 +415,7 @@ export default function BackgroundLabPage() {
           ></div>
         </ResizableBox>
       </div>
+      <CreditFooter className="absolute bottom-4 left-0 right-0" />
     </div>
   );
 }

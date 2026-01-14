@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import CreditFooter from '@/components/CreditFooter';
 
 type Rect = {
   x: number;
@@ -224,6 +225,7 @@ export default function LayoutLabPage() {
       <ResizableBox rect={cardRightRect} label="Card Auxiliar" onChange={setCardRightRect}>
         <div className="absolute inset-0 rounded-3xl border border-white/30 bg-white/60 dark:bg-slate-900/60 backdrop-blur-md"></div>
       </ResizableBox>
+      <CreditFooter className="absolute bottom-4 left-0 right-0" />
     </div>
   );
 }

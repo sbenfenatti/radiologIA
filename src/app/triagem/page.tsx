@@ -18,6 +18,7 @@ import { useSupabaseUser } from '@/hooks/use-supabase-user';
 import { useSessionExpiry } from '@/hooks/use-session-expiry';
 import { supabase } from '@/lib/supabase/client';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import CreditFooter from '@/components/CreditFooter';
 
 type ModelType = 'yolo' | 'mask_rcnn' | 'combined';
 
@@ -2065,6 +2066,7 @@ export default function TriagemPage() {
           </section>
         </div>
       </main>
+      <CreditFooter className="mt-8 pb-6" />
     </div>
   );
 }

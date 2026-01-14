@@ -9,6 +9,7 @@ import { useSessionExpiry } from '@/hooks/use-session-expiry';
 import { supabase } from '@/lib/supabase/client';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import FindingsViewer, { normalizeFindings, type RawFinding } from '@/components/triagem/FindingsViewer';
+import CreditFooter from '@/components/CreditFooter';
 
 type ChatRole = 'user' | 'model' | 'system';
 
@@ -987,6 +988,7 @@ export default function AuxiliarClinicoPage() {
           )}
         </div>
       </main>
+      <CreditFooter className="mt-8 pb-6" />
     </div>
   );
 }

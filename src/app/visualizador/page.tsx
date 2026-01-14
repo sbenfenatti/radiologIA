@@ -5,6 +5,7 @@ import FindingsViewer, {
   normalizeFindings,
   type RawFinding,
 } from '@/components/triagem/FindingsViewer';
+import CreditFooter from '@/components/CreditFooter';
 
 type SinglePayload = {
   name?: string;
@@ -198,6 +199,7 @@ export default function VisualizadorSandboxPage() {
           </>
         )}
       </div>
+      <CreditFooter className="mt-8 pb-4" />
     </div>
   );
 }

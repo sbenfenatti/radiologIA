@@ -1,10 +1,11 @@
 'use client';
 
 import Link from 'next/link';
+import CreditFooter from '@/components/CreditFooter';
 
 export default function PerfilPage() {
   return (
-    <div className="min-h-screen bg-background text-gray-900 dark:text-gray-100 flex items-center justify-center p-8">
+    <div className="min-h-screen bg-background text-gray-900 dark:text-gray-100 flex flex-col items-center justify-center gap-6 p-8">
       <div className="max-w-xl w-full glass-panel rounded-3xl p-8 text-center">
         <h1 className="text-2xl font-bold text-brand-blue dark:text-white">Perfil</h1>
         <p className="mt-3 text-sm text-brand-blue/70 dark:text-white/70">
@@ -17,6 +18,7 @@ export default function PerfilPage() {
           Voltar ao dashboard
         </Link>
       </div>
+      <CreditFooter />
     </div>
   );
 }

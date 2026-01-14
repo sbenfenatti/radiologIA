@@ -1392,8 +1392,8 @@ export default function TriagemPage() {
           <img
             src={
               isDarkMode
-                ? 'https://i.ibb.co/yBWfdYwN/Captura-de-Tela-2026-01-08-s-13-17-59-removebg-preview.png'
-                : 'https://i.ibb.co/B5Lsvm4M/Captura-de-Tela-2026-01-08-s-12-59-47-removebg-preview.png'
+                ? '/brand/wordmark-dark.png'
+                : '/brand/wordmark-light.png'
             }
             alt="radiologIA"
             className="h-9 w-auto drop-shadow-sm"
@@ -1453,7 +1453,7 @@ export default function TriagemPage() {
 
       <div className="absolute inset-0 z-0 flex items-center justify-center pointer-events-none">
         <img
-          src="https://i.ibb.co/9HFVnY4x/Gemini-Generated-Image-oc1jgfoc1jgfoc1j-Photoroom.png"
+          src="/brand/atom.png"
           alt=""
           aria-hidden="true"
           className="w-[70vw] max-w-5xl opacity-70 blur-md"

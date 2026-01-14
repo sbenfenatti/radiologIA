@@ -166,7 +166,7 @@ export default function LoginPage() {
             <div className="absolute inset-0 bg-white/0 dark:bg-white/5 rounded-full blur-xl transition-all duration-500"></div>
 
             <img
-              src="https://i.ibb.co/9HFVnY4x/Gemini-Generated-Image-oc1jgfoc1jgfoc1j-Photoroom.png"
+              src="/brand/atom.png"
               alt="Logo RadiologIA"
               className="relative w-full h-full object-contain transition-transform hover:scale-105 duration-300 drop-shadow-md logo-flag-sync"
               onError={(e) => {
@@ -185,12 +185,12 @@ export default function LoginPage() {
 
           <div className="h-20 -mt-12 relative w-full flex justify-center">
             <img
-              src="https://i.ibb.co/B5Lsvm4M/Captura-de-Tela-2026-01-08-s-12-59-47-removebg-preview.png"
+              src="/brand/wordmark-light.png"
               alt="radiologIA"
               className={cn('h-full object-contain drop-shadow-sm', isDarkMode ? 'hidden' : 'block')}
             />
             <img
-              src="https://i.ibb.co/yBWfdYwN/Captura-de-Tela-2026-01-08-s-13-17-59-removebg-preview.png"
+              src="/brand/wordmark-dark.png"
               alt="radiologIA"
               className={cn('h-full object-contain drop-shadow-sm', isDarkMode ? 'block' : 'hidden')}
             />

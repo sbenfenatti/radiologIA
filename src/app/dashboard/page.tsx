@@ -159,7 +159,7 @@ export default function PresentationPage() {
         <div className="min-h-screen flex flex-col items-center justify-start px-6 pb-24 pt-12 antialiased relative overflow-hidden transition-colors duration-500 text-gray-900 dark:text-gray-100 bg-background">
             <div className="absolute inset-0 z-0 pointer-events-none flex items-center justify-center">
                 <img
-                    src="https://i.ibb.co/9HFVnY4x/Gemini-Generated-Image-oc1jgfoc1jgfoc1j-Photoroom.png"
+                    src="/brand/atom.png"
                     alt="Logo RadiologIA"
                     className="w-[70vw] max-w-[980px] opacity-90 blur-2xl object-contain"
                 />
@@ -219,8 +219,8 @@ export default function PresentationPage() {
                 <div className="absolute z-10" style={toStyle(layout.wordmark)}>
                     <img
                         src={isDarkMode
-                            ? "https://i.ibb.co/yBWfdYwN/Captura-de-Tela-2026-01-08-s-13-17-59-removebg-preview.png"
-                            : "https://i.ibb.co/B5Lsvm4M/Captura-de-Tela-2026-01-08-s-12-59-47-removebg-preview.png"}
+                            ? "/brand/wordmark-dark.png"
+                            : "/brand/wordmark-light.png"}
                         alt="radiologIA"
                         className="w-full h-full object-contain drop-shadow-sm"
                     />

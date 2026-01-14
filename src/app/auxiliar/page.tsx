@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, LogOut, Moon, Sun, UserRound } from 'lucide-react';
 import Link from 'next/link';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { useSupabaseUser } from '@/hooks/use-supabase-user';
 import { useSessionExpiry } from '@/hooks/use-session-expiry';
 import { supabase } from '@/lib/supabase/client';
@@ -91,23 +91,31 @@ export default function AuxiliarClinicoPage() {
   const isAuthenticated = Boolean(user || hasTokenAccess);
   const authIdentity = user?.id ?? (hasTokenAccess ? 'visitor' : null);
   const baseApiUrl = process.env.NEXT_PUBLIC_MODAL_API_URL ?? '';
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const debugEnabled = useMemo(() => {
-    if (pathname?.includes('/debug')) {
-      return true;
-    }
-    if (!searchParams) {
-      return false;
-    }
-    const debugParam = searchParams.get('debug');
-    return (
-      debugParam === '1' ||
-      debugParam === 'true' ||
-      searchParams.has('debug') ||
-      searchParams.has('debug1')
-    );
-  }, [pathname, searchParams]);
+  const [debugEnabled, setDebugEnabled] = useState(false);
+
+  useEffect(() => {
+    const updateDebugState = () => {
+      if (typeof window === 'undefined') {
+        return;
+      }
+      const { pathname, search } = window.location;
+      if (pathname.includes('/debug')) {
+        setDebugEnabled(true);
+        return;
+      }
+      const params = new URLSearchParams(search);
+      const debugParam = params.get('debug');
+      setDebugEnabled(
+        debugParam === '1' ||
+          debugParam === 'true' ||
+          params.has('debug') ||
+          params.has('debug1'),
+      );
+    };
+    updateDebugState();
+    window.addEventListener('popstate', updateDebugState);
+    return () => window.removeEventListener('popstate', updateDebugState);
+  }, []);
 
   const normalizeImageFile = (file: File) =>
     new Promise<File>((resolve, reject) => {
@@ -625,8 +633,8 @@ export default function AuxiliarClinicoPage() {
           <img
             src={
               isDarkMode
-                ? 'https://i.ibb.co/yBWfdYwN/Captura-de-Tela-2026-01-08-s-13-17-59-removebg-preview.png'
-                : 'https://i.ibb.co/B5Lsvm4M/Captura-de-Tela-2026-01-08-s-12-59-47-removebg-preview.png'
+                ? '/brand/wordmark-dark.png'
+                : '/brand/wordmark-light.png'
             }
             alt="radiologIA"
             className="h-9 w-auto drop-shadow-sm"
@@ -705,7 +713,7 @@ export default function AuxiliarClinicoPage() {
 
       <div className="absolute inset-0 z-0 flex items-center justify-center pointer-events-none">
         <img
-          src="https://i.ibb.co/9HFVnY4x/Gemini-Generated-Image-oc1jgfoc1jgfoc1j-Photoroom.png"
+          src="/brand/atom.png"
           alt=""
           aria-hidden="true"
           className="w-[72vw] max-w-5xl opacity-90"

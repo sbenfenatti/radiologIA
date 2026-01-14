@@ -2,8 +2,11 @@ import type {Metadata} from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'RadiologIA',
+  title: 'radiologIA',
   description: 'Diagnósticos Odontológicos Potencializados por IA',
+  icons: {
+    icon: '/brand/atom.png',
+  },
 };
 
 export default function RootLayout({

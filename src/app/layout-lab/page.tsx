@@ -201,7 +201,7 @@ export default function LayoutLabPage() {
 
       <ResizableBox rect={logoRect} label="Logo (atomo)" onChange={setLogoRect}>
         <img
-          src="https://i.ibb.co/9HFVnY4x/Gemini-Generated-Image-oc1jgfoc1jgfoc1j-Photoroom.png"
+          src="/brand/atom.png"
           alt="Logo RadiologIA"
           className="absolute inset-0 w-full h-full object-contain drop-shadow-xl"
           draggable={false}
@@ -210,7 +210,7 @@ export default function LayoutLabPage() {
 
       <ResizableBox rect={wordmarkRect} label="Wordmark" onChange={setWordmarkRect}>
         <img
-          src="https://i.ibb.co/B5Lsvm4M/Captura-de-Tela-2026-01-08-s-12-59-47-removebg-preview.png"
+          src="/brand/wordmark-light.png"
           alt="radiologIA"
           className="absolute inset-0 w-full h-full object-contain drop-shadow-sm"
           draggable={false}

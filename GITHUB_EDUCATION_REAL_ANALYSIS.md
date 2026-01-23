@@ -5,7 +5,7 @@
 ```
 Frontend:  Vercel (grátis com GitHub Education) ✅
 Backend:   Modal.com (GPU training) ⚠️
-Training:  Google Colab (notebook) ⚠️
+Training:  Google Colab (notebook, free tier) ⚠️
 Database:  Supabase (grátis, planejado) ✅
 ```
 
@@ -39,7 +39,7 @@ Exemplo: A100 training job (10h/semana)
 1. RunPod         $2.50/h (H100)    ← 20% mais barato que Modal
 2. Thunder        $0.31-0.52/h      ← 40-50% mais barato
 3. DigitalOcean   $0.51/h           ← Parecido com Thunder
-4. Google Cloud   Varia + $50 FREE  ← Coberter por GitHub Edu
+4. Google Cloud   Varia + $50 FREE  ← Coberto por GitHub Edu
 ```
 
 **Análise honesta**: 
@@ -72,39 +72,35 @@ Pro:   Mostly T4, A100 occasional        = $10/mês
 Pro+:  Prioridade A100                   = $50/mês
 ```
 
-**Com GitHub Education**:
+**⚠️ CORREÇÃO - Colab Pro para Educação:**
 ```
-NOVO: Google Colab Pro grátis 1 ano!
-      (announced July 2025)
+Google oferece Colab Pro GRÁTIS por 1 ano, MAS:
+❌ APENAS para universidades baseadas nos EUA (.edu)
+❌ Supply já esgotado (conforme FAQ oficial Google)
+
+Seu status (Brasil): NÃO elegível
 ```
 
-**Seu ganho**: $10/mês = $120/ano (ou $50 se usava Pro+) ✅
-
-**Ação**: 
-```bash
-# Verifique se você é elegível
-# Universidade brasileira + GitHub Education account
-# Se sim: reivindique Colab Pro FREE por 1 ano
-```
+**Realidade atual**: Você continua pagando se quer Pro, ou usa free tier.
 
 ---
 
-## 🎯 GitHub Education Real Value Para Você
+## 🎯 GitHub Education - Valor REAL Para Você
 
 ### ✅ Ganhos Concretos
 
 | Benefício | Seu Cenário | Ganho |
 |-----------|------------|-------|
 | **Vercel Hobby** | Já usa | $240/ano (mantém) |
-| **Colab Pro** | Treina em notebook | $120-600/ano (novo!) |
 | **Google Cloud $50** | Para ML experiments | $50 one-time (novo!) |
 | **Copilot Pro** | Acelera dev | $240/ano (novo!) |
 | **JetBrains** | WebStorm para Next.js | $200/ano (novo!) |
 | **Supabase** | Backend DB (planejado) | $0/mês (novo!) |
-| **TOTAL** | - | **~$850-1,240/ano** |
+| **TOTAL** | - | **~$730/ano** |
 
-### ❌ NÃO É Útil Para Você
+### ❌ NÃO é útil para você
 
+- **Colab Pro**: Apenas US universities (you're in Brazil)
 - **Heroku**: Você usa Modal (melhor para ML)
 - **Namecheap .me**: Nice-to-have, não core
 - **Figma**: Você trabalha com shadcn/ui (não design-heavy)
@@ -115,15 +111,14 @@ NOVO: Google Colab Pro grátis 1 ano!
 
 ### **Imediato (Esta semana)**
 ```bash
-# 1. Reivindicar Colab Pro FREE (GitHub Education)
-- Acesse: https://colab.research.google.com/
-- Settings → Upgrade → Verifique elegibilidade
-- ECONOMIZA: $120/ano imediato
-
-# 2. Ativar Google Cloud $50 credits
+# 1. Ativar Google Cloud $50 credits
 - Sign up: cloud.google.com/edu
 - Link com GitHub Education account
 - ECONOMIZA: $50 em Vision API (Phase 2 do radiologIA)
+
+# 2. Verificar Colab Pro elegibilidade (improvável)
+- Se universidade US-based: https://colab.research.google.com/
+- Se não: Continue usando free tier (K80/T4)
 ```
 
 ### **Semana 1-2 (Se treina >20h/semana)**
@@ -154,7 +149,7 @@ NOVO: Google Colab Pro grátis 1 ano!
 
 ---
 
-## 📊 Decisão: Modal vs Google Cloud vs RunPod
+## 🎯 Decisão: Modal vs Google Cloud vs RunPod
 
 ### Seu Cenário (radiologIA - treinamento de modelos odontológicos)
 
@@ -197,15 +192,15 @@ Custo: $30-60/mês
 FASE ATUAL (MVP - training <10h/semana):
 ├─ Frontend: Vercel (GitHub Education FREE) ✅
 ├─ Backend: Modal (mantém, está funcionando) ✅
-├─ Training: Colab Pro (GitHub Education NEW!) ✅
-└─ Total custo: $0 (tudo coberto)
+├─ Training: Colab free tier (continue usando)
+└─ Total custo: ~$40-80/mês (Modal é custo fixo)
 
 FASE 2 (Integração Vision - precisa GPU frequente):
 ├─ Frontend: Vercel (idem)
 ├─ Backend: Modal (ou migra para RunPod se budget)
 ├─ Training: Google Cloud (use $50 credits)
 ├─ Vision API: Google Cloud (included)
-└─ Total custo: $0-50/mês
+└─ Total custo: $0-50/mês (com credits, depois aumenta)
 
 FASE 3+ (Produção - >100h/semana GPU):
 ├─ Reavalie: RunPod ou Thread (mais barato)
@@ -218,9 +213,9 @@ FASE 3+ (Produção - >100h/semana GPU):
 ## ⚠️ Armadilhas & Realidades
 
 ### "GitHub Education vai economizar meu custo de training"
-**Honesto**: Parcialmente. 
-- Colab Pro: +$120/ano (pequeno ganho)
+**Honesto**: Apenas marginalmente.
 - Google Cloud $50: One-time, suficiente pra Phase 2
+- Colab Pro: Não acessível (apenas US universities)
 - Principal economia: Vercel + Copilot + JetBrains (frontend/dev, não training)
 
 Se treina modelos pesados (>50h/semana), GPU costs dominam e GitHub Edu ajuda pouco.
@@ -251,20 +246,20 @@ Use credits pra Phase 2 (validar workflow), não pra produção em escala.
 
 ```bash
 # FAZER AGORA
-□ Reivindique Colab Pro FREE (elegibilidade: student + GitHub Edu)
-□ Ative Google Cloud $50 credits
-□ Continue em Vercel (já está FREE)
-□ Verifique Copilot Pro (grátis como estudante)
+☐ Ative Google Cloud $50 credits
+☐ Continue em Vercel (já está FREE)
+☐ Verifique Copilot Pro (grátis como estudante)
+☐ Mantenha Colab free tier ou considere pagar Pro se necessário
 
 # FAZER NA FASE 2
-□ Teste RunPod se treina >20h/semana
-□ Use Google Cloud Vision API ($50 credits)
-□ Integre com radiologIA backend
+☐ Teste RunPod se treina >20h/semana
+☐ Use Google Cloud Vision API ($50 credits)
+☐ Integre com radiologIA backend
 
 # FAZER NA FASE 3+
-□ Migre para infrastructure paga (RunPod/Thread)
-□ Considere reserved instances (desconto)
-□ Monitore custos com budget alerts
+☐ Migre para infrastructure paga (RunPod/Thread)
+☐ Considere reserved instances (desconto)
+☐ Monitore custos com budget alerts
 ```
 
 ---
@@ -282,11 +277,11 @@ Realidade:
 - **Priorize**: Focar no MVP funcionar, não em micro-otimizações
 
 **Estratégia saudável**:
-1. **Hoje**: Reclama Colab Pro + Google credits ($120-50 grátis)
+1. **Hoje**: Reclama Google credits + Copilot ($290 valor)
 2. **Mês 2**: Se precisa mais GPU, re-evalua Modal vs alternativas
 3. **Ano 1**: Quando tiver tração real, reotimiza infra com dados
 
-Não seja a pessoa que passa 10h migrando de cloud por $30/mês 😅
+Não seja a pessoa que passa 10h migrando de cloud por $30/mês 😄
 
 ---
 
@@ -295,18 +290,29 @@ Não seja a pessoa que passa 10h migrando de cloud por $30/mês 😅
 **CONTINUE ASSIM:**
 - ✅ Vercel (frontend) = GitHub Edu FREE
 - ✅ Modal (backend) = Está funcionando bem
-- ✅ Colab (notebook) = Upgrade para PRO GRÁTIS (novo!)
+- ✅ Colab (notebook) = Use free tier
 
 **GANHE AGORA:**
-- 📥 Colab Pro FREE: +$120/ano
-- 📥 Google Cloud $50: Para Phase 2
-- 📥 Copilot Pro: Acelera dev Next.js/TypeScript
+- 📧 Google Cloud $50: Para Phase 2
+- 📧 Copilot Pro: Acelera dev Next.js/TypeScript
+- 📧 JetBrains WebStorm: IDE profissional
 
 **NÃO TROQUE AGORA:**
 - ❌ Modal → RunPod (economia não compensa tempo)
+- ❌ Colab Pro (não elegível - apenas US universities)
 
-**TOTAL GANHO**: ~$360-600/ano em benefícios que você realmente usa
+**TOTAL GANHO**: ~$490/ano em benefícios que você realmente usa
 
 ---
 
-*Atualizado: Jan 22, 2026 | Análise realista para seu stack específico*
+## ⚡ Correção
+
+⚠️ **Versão anterior tinha erro**: Coloquei Colab Pro como benefício incluído. Não está. Google oferece Colab Pro grátis, mas:
+1. Apenas para US-based universities
+2. Supply já esgotado
+
+Desculpa pela confusão! 🙏
+
+---
+
+*Atualizado: Jan 22, 2026 | Análise realista e corrigida para seu stack específico*

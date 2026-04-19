@@ -795,14 +795,10 @@ export default function TriagemPage() {
   const uploadUnlocked = false;
 
   useEffect(() => {
-    if (!authIdentity) {
-      return;
-    }
-    if (
-      triagemCache &&
-      triagemCache.identity === authIdentity &&
-      cases.length === 0
-    ) {
+    if (!authIdentity) return;
+    
+    // Restaurar do cache na montagem
+    if (triagemCache && triagemCache.identity === authIdentity && cases.length === 0) {
       setCases(triagemCache.cases);
       setHideAnatomy(triagemCache.hideAnatomy);
       setNormalizeToothLabel(triagemCache.normalizeToothLabel);
@@ -810,18 +806,16 @@ export default function TriagemPage() {
   }, [authIdentity]);
 
   useEffect(() => {
-    if (!authIdentity) {
-      triagemCache = null;
-      return;
+    if (!authIdentity) return;
+    
+    // Atualizar o cache sempre que tivermos dados (nunca limpar implicitamente aqui)
+    if (cases.length > 0) {
+      triagemCache = { cases, hideAnatomy, normalizeToothLabel, identity: authIdentity };
     }
-    if (cases.length === 0) {
-      triagemCache = null;
-      return;
-    }
-    triagemCache = { cases, hideAnatomy, normalizeToothLabel, identity: authIdentity };
   }, [cases, hideAnatomy, normalizeToothLabel, authIdentity]);
 
   useEffect(() => {
+    // Limpar cache se a identidade mudar para outra pessoa
     if (triagemCache && authIdentity && triagemCache.identity !== authIdentity) {
       triagemCache = null;
     }
@@ -1249,6 +1243,7 @@ export default function TriagemPage() {
   };
 
   const clearBatch = () => {
+    triagemCache = null; // Destrói o cache explicitamente
     setCases((prev) => {
       prev.forEach((caseItem) => {
         revokeObjectUrl(caseItem.previewUrl);
